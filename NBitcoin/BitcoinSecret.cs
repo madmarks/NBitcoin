@@ -23,8 +23,8 @@ namespace NBitcoin
 				return keyBytes.Concat(new byte[] { 0x01 }).ToArray();
 		}
 		public BitcoinSecret(string base58, Network expectedAddress = null)
-			: base(base58, expectedAddress)
 		{
+			Init<BitcoinSecret>(base58, expectedAddress);
 		}
 
 		private BitcoinPubKeyAddress _address;
@@ -32,6 +32,11 @@ namespace NBitcoin
 		public BitcoinPubKeyAddress GetAddress()
 		{
 			return _address ?? (_address = PrivateKey.PubKey.GetAddress(Network));
+		}
+
+		public BitcoinWitPubKeyAddress GetSegwitAddress()
+		{
+			return PrivateKey.PubKey.GetSegwitAddress(Network);
 		}
 
 		public virtual KeyId PubKeyHash
@@ -93,7 +98,8 @@ namespace NBitcoin
 			}
 			else
 			{
-				byte[] result = Encoders.Base58Check.DecodeData(wifData);
+				var enc = Network.NetworkStringParser.GetBase58CheckEncoder();
+				byte[] result = enc.DecodeData(wifData);
 				var resultList = result.ToList();
 
 				if(compressed.Value)
@@ -104,7 +110,7 @@ namespace NBitcoin
 				{
 					resultList.RemoveAt(resultList.Count - 1);
 				}
-				return new BitcoinSecret(Encoders.Base58Check.EncodeData(resultList.ToArray()), Network);
+				return new BitcoinSecret(enc.EncodeData(resultList.ToArray()), Network);
 			}
 		}
 
@@ -135,7 +141,5 @@ namespace NBitcoin
 		}
 
 		#endregion
-
-
 	}
 }

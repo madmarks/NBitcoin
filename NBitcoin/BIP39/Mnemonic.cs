@@ -1,4 +1,4 @@
-﻿
+﻿#pragma warning disable CS0618 // Type or member is obsolete
 using System;
 using System.Collections.Generic;
 using System.Collections;
@@ -27,7 +27,7 @@ namespace NBitcoin
 		public Mnemonic(string mnemonic, Wordlist wordlist = null)
 		{
 			if(mnemonic == null)
-				throw new ArgumentNullException("mnemonic");
+				throw new ArgumentNullException(nameof(mnemonic));
 			_Mnemonic = mnemonic.Trim();
 
 			if(wordlist == null)
@@ -37,7 +37,7 @@ namespace NBitcoin
 			//if the sentence is not at least 12 characters or cleanly divisible by 3, it is bad!
 			if(!CorrectWordCount(words.Length))
 			{
-				throw new FormatException("Word count should be equals to 12,15,18,21 or 24");
+				throw new FormatException("Word count should be 12,15,18,21 or 24");
 			}
 			_Words = words;
 			_WordList = wordlist;
@@ -81,7 +81,7 @@ namespace NBitcoin
 		{
 			var ms = (int)wordCount;
 			if(!CorrectWordCount(ms))
-				throw new ArgumentException("Word count should be equal to 12,15,18,21 or 24", "wordCount");
+				throw new ArgumentException("Word count should be 12,15,18,21 or 24", "wordCount");
 			int i = Array.IndexOf(msArray, (int)wordCount);
 			return RandomUtils.GetBytes(entArray[i] / 8);
 		}
@@ -172,13 +172,14 @@ namespace NBitcoin
 			}
 		}
 
+		static Encoding NoBOMUTF8 = new UTF8Encoding(false);
 		public byte[] DeriveSeed(string passphrase = null)
 		{
 			passphrase = passphrase ?? "";
-			var salt = Concat(Encoding.UTF8.GetBytes("mnemonic"), Normalize(passphrase));
+			var salt = Concat(NoBOMUTF8.GetBytes("mnemonic"), Normalize(passphrase));
 			var bytes = Normalize(_Mnemonic);
 
-#if USEBC || WINDOWS_UWP || NETCORE
+#if USEBC || WINDOWS_UWP || NETCORE || NETSTANDARD1X
 			var mac = new NBitcoin.BouncyCastle.Crypto.Macs.HMac(new NBitcoin.BouncyCastle.Crypto.Digests.Sha512Digest());
 			mac.Init(new KeyParameter(bytes));
 			return Pbkdf2.ComputeDerivedKey(mac, salt, 2048, 64);
@@ -190,17 +191,49 @@ namespace NBitcoin
 
 		internal static byte[] Normalize(string str)
 		{
-			return Encoding.UTF8.GetBytes(NormalizeString(str));
+			return NoBOMUTF8.GetBytes(NormalizeString(str));
 		}
 
 		internal static string NormalizeString(string word)
 		{
 #if !NOSTRNORMALIZE
-			return word.Normalize(NormalizationForm.FormKD);
+			if(!SupportOsNormalization())
+			{
+				return KDTable.NormalizeKD(word);
+			}
+			else
+			{
+				return word.Normalize(NormalizationForm.FormKD);
+			}
 #else
 			return KDTable.NormalizeKD(word);
 #endif
 		}
+
+#if !NOSTRNORMALIZE
+		static bool? _SupportOSNormalization;
+		internal static bool SupportOsNormalization()
+		{
+			if(_SupportOSNormalization == null)
+			{
+				var notNormalized = "あおぞら";
+				var normalized = "あおぞら";
+				if(notNormalized.Equals(normalized, StringComparison.Ordinal))
+				{
+					_SupportOSNormalization = false;
+				}
+				else
+				{
+					try
+					{
+						_SupportOSNormalization = notNormalized.Normalize(NormalizationForm.FormKD).Equals(normalized, StringComparison.Ordinal);
+					}
+					catch { _SupportOSNormalization = false; }
+				}
+			}
+			return _SupportOSNormalization.Value;
+		}
+#endif
 
 		public ExtKey DeriveExtKey(string passphrase = null)
 		{
@@ -235,3 +268,4 @@ namespace NBitcoin
 		TwentyFour = 24
 	}
 }
+#pragma warning restore CS0618 // Type or member is obsolete

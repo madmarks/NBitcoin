@@ -1,7 +1,8 @@
-﻿using NBitcoin.Crypto;
+﻿using NBitcoin.BouncyCastle.Math;
+using NBitcoin.Crypto;
 using System;
 using System.Linq;
-using System.Numerics;
+using System.Text;
 
 namespace NBitcoin.DataEncoders
 {
@@ -9,12 +10,22 @@ namespace NBitcoin.DataEncoders
 	{
 		private static readonly Base58Encoder InternalEncoder = new Base58Encoder();
 
+		/// <summary>
+		/// Fast check if the string to know if base58 str
+		/// </summary>
+		/// <param name="str"></param>
+		/// <returns></returns>
+		public override bool IsMaybeEncoded(string str)
+		{
+			return base.IsMaybeEncoded(str) && str.Length > 4;
+		}
+
 		public override string EncodeData(byte[] data, int offset, int count)
 		{
 			var toEncode = new byte[count + 4];
 			Buffer.BlockCopy(data, offset, toEncode, 0, count);
 
-			var hash = Hashes.Hash256(data, offset, count).ToBytes();
+			var hash = CalculateHash(data, offset, count);
 			Buffer.BlockCopy(hash, 0, toEncode, count, 4);
 
 			return InternalEncoder.EncodeData(toEncode, 0, toEncode.Length);
@@ -28,10 +39,9 @@ namespace NBitcoin.DataEncoders
 				Array.Clear(vchRet, 0, vchRet.Length);
 				throw new FormatException("Invalid checked base 58 string");
 			}
-			var calculatedHash = Hashes.Hash256(vchRet, 0, vchRet.Length - 4).ToBytes().SafeSubarray(0, 4);
-			var expectedHash = vchRet.SafeSubarray(vchRet.Length - 4, 4);
+			var calculatedHash = CalculateHash(vchRet, 0, vchRet.Length - 4);
 
-			if(!Utils.ArrayEqual(calculatedHash, expectedHash))
+			if(!Utils.ArrayEqual(calculatedHash, 0, vchRet, vchRet.Length - 4, 4))
 			{
 				Array.Clear(vchRet, 0, vchRet.Length);
 				throw new FormatException("Invalid hash of the base 58 string");
@@ -39,59 +49,90 @@ namespace NBitcoin.DataEncoders
 			vchRet = vchRet.SafeSubarray(0, vchRet.Length - 4);
 			return vchRet;
 		}
+
+		protected virtual byte[] CalculateHash(byte[] bytes, int offset, int length)
+		{
+			return Hashes.Hash256RawBytes(bytes, offset, length);
+		}
 	}
 
 	public class Base58Encoder : DataEncoder
 	{
+		/// <summary>
+		/// Fast check if the string to know if base58 str
+		/// </summary>
+		/// <param name="str"></param>
+		/// <returns></returns>
+		public virtual bool IsMaybeEncoded(string str)
+		{
+			bool maybeb58 = true;
+			if(maybeb58)
+			{
+				for(int i = 0; i < str.Length; i++)
+				{
+					if(!Base58Encoder.pszBase58Chars.Contains(str[i]))
+					{
+						maybeb58 = false;
+						break;
+					}
+				}
+			}
+			return maybeb58 && str.Length > 0;
+		}
+
+		static readonly BigInteger bn58 = BigInteger.ValueOf(58);
 		public override string EncodeData(byte[] data, int offset, int count)
 		{
-			BigInteger bn58 = 58;
-			BigInteger bn0 = 0;
+
+			BigInteger bn0 = BigInteger.Zero;
 
 			// Convert big endian data to little endian
 			// Extra zero at the end make sure bignum will interpret as a positive number
-			var vchTmp = data.SafeSubarray(offset, count).Reverse().Concat(new byte[] { 0x00 }).ToArray();
+			var vchTmp = data.SafeSubarray(offset, count);
 
 			// Convert little endian data to bignum
-			var bn = new BigInteger(vchTmp);
+			var bn = new BigInteger(1, vchTmp);
 
 			// Convert bignum to std::string
-			var str = "";
+			StringBuilder builder = new StringBuilder();
 			// Expected size increase from base58 conversion is approximately 137%
 			// use 138% to be safe
 
-			while(bn > bn0)
+			while(bn.CompareTo(bn0) > 0)
 			{
-				BigInteger rem;
-				var dv = BigInteger.DivRem(bn, bn58, out rem);
+				var r = bn.DivideAndRemainder(bn58);
+				var dv = r[0];
+				BigInteger rem = r[1];
 				bn = dv;
-				var c = (int)rem;
-				str += pszBase58[c];
+				var c = rem.IntValue;
+				builder.Append(pszBase58[c]);
 			}
 
 			// Leading zeroes encoded as base58 zeros
 			for(int i = offset; i < offset + count && data[i] == 0; i++)
-				str += pszBase58[0];
+				builder.Append(pszBase58[0]);
 
 			// Convert little endian std::string to big endian
-			str = new String(str.ToCharArray().Reverse().ToArray()); //keep that way to be portable
+			var chars = builder.ToString().ToCharArray();
+			Array.Reverse(chars);
+			var str = new String(chars); //keep that way to be portable
 			return str;
 		}
 
 
-		const string pszBase58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+		internal const string pszBase58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+		internal static readonly char[] pszBase58Chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".ToCharArray();
 
 
 		public override byte[] DecodeData(string encoded)
 		{
 			if(encoded == null)
-				throw new ArgumentNullException("encoded");
+				throw new ArgumentNullException(nameof(encoded));
 
 			var result = new byte[0];
 			if(encoded.Length == 0)
 				return result;
-			BigInteger bn58 = 58;
-			BigInteger bn = 0;
+			BigInteger bn = BigInteger.Zero;
 			int i = 0;
 			while(IsSpace(encoded[i]))
 			{
@@ -115,13 +156,14 @@ namespace NBitcoin.DataEncoders
 						throw new FormatException("Invalid base 58 string");
 					break;
 				}
-				var bnChar = new BigInteger(p1);
-				bn = BigInteger.Multiply(bn, bn58);
-				bn += bnChar;
+				var bnChar = BigInteger.ValueOf(p1);
+				bn = bn.Multiply(bn58);
+				bn = bn.Add(bnChar);
 			}
 
 			// Get bignum as little endian data
-			var vchTmp = bn.ToByteArray();
+			var vchTmp = bn.ToByteArrayUnsigned();
+			Array.Reverse(vchTmp);
 			if(vchTmp.All(b => b == 0))
 				vchTmp = new byte[0];
 

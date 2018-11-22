@@ -34,6 +34,31 @@ namespace NBitcoin.Tests
 			Assert.False(mnemonic.IsValidChecksum);
 		}
 
+
+		[Fact]
+		[Trait("UnitTest", "UnitTest")]
+		public void CanCheckBIP39TestVectors()
+		{
+			CanCheckBIP39TestVectorsCore("fr", Wordlist.French);
+			CanCheckBIP39TestVectorsCore("ja", Wordlist.Japanese);
+			CanCheckBIP39TestVectorsCore("es", Wordlist.Spanish);
+			CanCheckBIP39TestVectorsCore("en", Wordlist.English);
+			CanCheckBIP39TestVectorsCore("zh-CN", Wordlist.ChineseSimplified);
+			CanCheckBIP39TestVectorsCore("zh-TW", Wordlist.ChineseTraditional);
+		}
+
+		private void CanCheckBIP39TestVectorsCore(string file, Wordlist wordlist)
+		{
+			var tests = JArray.Parse(File.ReadAllText($"data/bip39_vectors.{file}.json"));
+			foreach(var test in tests.Children().OfType<JObject>())
+			{
+				var mnemonic = new Mnemonic(test["mnemonic"].Value<string>(), wordlist);
+				var actual = mnemonic.DeriveExtKey(test["passphrase"].Value<string>()).GetWif(Network.Main);
+				var expected = new BitcoinExtKey(test["bip32_xprv"].Value<string>(), Network.Main);
+				Assert.Equal(actual, expected);
+			}
+		}
+
 		[Fact]
 		[Trait("UnitTest", "UnitTest")]
 		public void EngTest()
@@ -59,7 +84,19 @@ namespace NBitcoin.Tests
 			}
 		}
 
-#if NOSTRNORMALIZE
+		[Fact]
+		public void CanReturnTheListOfWords()
+		{
+			var lang = Wordlist.English;
+			var words = lang.GetWords();
+			int i;
+			foreach(var word in words)
+			{
+				Assert.True(lang.WordExists(word, out i));
+				Assert.True(i >=0 );
+			}
+		}
+
 		[Fact]
 		[Trait("UnitTest", "UnitTest")]
 		public void KDTableCanNormalize()
@@ -69,7 +106,7 @@ namespace NBitcoin.Tests
 			Assert.False(input == expected);
 			Assert.Equal(expected, KDTable.NormalizeKD(input));
 		}
-#endif
+
 		[Fact]
 		[Trait("UnitTest", "UnitTest")]
 		public void JapTest()
@@ -152,11 +189,13 @@ namespace NBitcoin.Tests
 			throw new NotSupportedException(lang);
 		}
 	}
-#if !PORTABLE
+
 	public class bip39_Codegen
 	{
 		//[Fact]
+#pragma warning disable xUnit1013 // Public method should be marked as test
 		public void GenerateHardcodedBIP39Dictionary()
+#pragma warning restore xUnit1013 // Public method should be marked as test
 		{
 			StringBuilder builder = new StringBuilder();
 			foreach(var lang in new[] { Language.ChineseSimplified, Language.ChineseTraditional, Language.English, Language.Japanese, Language.Spanish, Language.French })
@@ -268,5 +307,4 @@ namespace NBitcoin.Tests
 			return data.Replace("\n", "\\n");
 		}
 	}
-#endif
 }

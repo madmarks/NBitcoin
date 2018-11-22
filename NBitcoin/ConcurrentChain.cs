@@ -13,8 +13,29 @@ namespace NBitcoin
 	/// </summary>
 	public class ConcurrentChain : ChainBase
 	{
+		public class ChainSerializationFormat
+		{
+			public ChainSerializationFormat()
+			{
+				SerializePrecomputedBlockHash = true;
+				SerializeBlockHeader = true;
+			}
+			public bool SerializePrecomputedBlockHash
+			{
+				get; set;
+			}
+			public bool SerializeBlockHeader
+			{
+				get; set;
+			}
+			internal void AssertCoherent()
+			{
+				if(!SerializePrecomputedBlockHash && !SerializeBlockHeader)
+					throw new InvalidOperationException("The ChainSerializationFormat is invalid, SerializePrecomputedBlockHash or SerializeBlockHeader shoudl be true");
+			}
+		}
 		Dictionary<uint256, ChainedBlock> _BlocksById = new Dictionary<uint256, ChainedBlock>();
-		Dictionary<int, ChainedBlock> _BlocksByHeight = new Dictionary<int, ChainedBlock>();
+		ChainedBlock[] _BlocksByHeight = new ChainedBlock[0];
 		ReaderWriterLock @lock = new ReaderWriterLock();
 
 		public ConcurrentChain()
@@ -34,23 +55,126 @@ namespace NBitcoin
 			}
 		}
 
-		public ConcurrentChain(byte[] bytes)
+		public ConcurrentChain(byte[] bytes, ConsensusFactory consensusFactory) : this(bytes, consensusFactory, null)
 		{
-			Load(bytes);
 		}
 
+		public ConcurrentChain(byte[] bytes, Consensus consensus) : this(bytes, consensus, null)
+		{
+		}
+
+		public ConcurrentChain(byte[] bytes, Network network) : this(bytes, network, null)
+		{
+		}
+
+		[Obsolete("Use ConcurrentChain(byte[], ConsensusFactory|Network|Consensus) instead")]
+		public ConcurrentChain(byte[] bytes) : this(bytes, Consensus.Main.ConsensusFactory, null)
+		{
+		}
+
+		public ConcurrentChain(byte[] bytes, ConsensusFactory consensusFactory, ChainSerializationFormat format)
+		{
+			Load(bytes, consensusFactory, format);
+		}
+
+		public ConcurrentChain(byte[] bytes, Consensus consensus, ChainSerializationFormat format)
+		{
+			Load(bytes, consensus, format);
+		}
+
+		public ConcurrentChain(byte[] bytes, Network network, ChainSerializationFormat format)
+		{
+			Load(bytes, network, format);
+		}
+
+		[Obsolete("Use ConcurrentChain(byte[], ConsensusFactory|Network|Consensus, ChainSerializationFormat format) instead")]
+		public ConcurrentChain(byte[] bytes, ChainSerializationFormat format)
+		{
+			Load(bytes, Consensus.Main.ConsensusFactory, format);
+		}
+
+		public void Load(byte[] chain, Network network, ChainSerializationFormat format)
+		{
+			Load(new MemoryStream(chain), network, format);
+		}
+
+		public void Load(byte[] chain, Consensus consensus, ChainSerializationFormat format)
+		{
+			Load(new MemoryStream(chain), consensus, format);
+		}
+
+		public void Load(byte[] chain, ConsensusFactory consensusFactory, ChainSerializationFormat format)
+		{
+			Load(new MemoryStream(chain), consensusFactory, format);
+		}
+
+		[Obsolete("Use Load(byte[], ConsensusFactory|Network|Consensus, ChainSerializationFormat format) instead")]
+		public void Load(byte[] chain, ChainSerializationFormat format)
+		{
+			Load(new MemoryStream(chain), Consensus.Main.ConsensusFactory, format);
+		}
+
+		public void Load(byte[] chain, ConsensusFactory consensusFactory)
+		{
+			Load(chain, consensusFactory, null);
+		}
+
+		public void Load(byte[] chain, Consensus consensus)
+		{
+			Load(chain, consensus, null);
+		}
+
+		public void Load(byte[] chain, Network network)
+		{
+			Load(chain, network, null);
+		}
+
+		[Obsolete("Use Load(byte[], ConsensusFactory|Network|Consensus) instead")]
 		public void Load(byte[] chain)
 		{
-			Load(new MemoryStream(chain));
+			Load(new MemoryStream(chain), Consensus.Main.ConsensusFactory, null);
 		}
 
+		public void Load(Stream stream, ConsensusFactory consensusFactory, ChainSerializationFormat format)
+		{
+			if(consensusFactory == null)
+				throw new ArgumentNullException(nameof(consensusFactory));
+			Load(new BitcoinStream(stream, false) { ConsensusFactory = consensusFactory }, format);
+		}
+
+		public void Load(Stream stream, Network network, ChainSerializationFormat format)
+		{
+			if(network == null)
+				throw new ArgumentNullException(nameof(network));
+			Load(stream, network.Consensus.ConsensusFactory, format);
+		}
+
+		public void Load(Stream stream, Consensus consensus, ChainSerializationFormat format)
+		{
+			if(consensus == null)
+				throw new ArgumentNullException(nameof(consensus));
+			Load(stream, consensus.ConsensusFactory, format);
+		}
+
+		[Obsolete("Use Load(Stream, ConsensusFactory|Network|Consensus, ChainSerializationFormat) instead")]
+		public void Load(Stream stream, ChainSerializationFormat format)
+		{
+			Load(stream, Consensus.Main.ConsensusFactory, format);
+		}
 		public void Load(Stream stream)
 		{
-			Load(new BitcoinStream(stream, false));
+			Load(new BitcoinStream(stream, false), null);
 		}
 
 		public void Load(BitcoinStream stream)
 		{
+			Load(stream, null);
+		}
+		public void Load(BitcoinStream stream, ChainSerializationFormat format)
+		{
+			format = format ?? new ChainSerializationFormat();
+			format.AssertCoherent();
+			var genesis = this.Genesis;
 			using(@lock.LockWrite())
 			{
 				try
@@ -59,18 +183,27 @@ namespace NBitcoin
 					while(true)
 					{
 						uint256.MutableUint256 id = null;
-						stream.ReadWrite<uint256.MutableUint256>(ref id);
+						if(format.SerializePrecomputedBlockHash)
+							stream.ReadWrite<uint256.MutableUint256>(ref id);
 						BlockHeader header = null;
-						stream.ReadWrite(ref header);
+						if(format.SerializeBlockHeader)
+							stream.ReadWrite(ref header);
 						if(height == 0)
 						{
-							_BlocksByHeight.Clear();
+							_BlocksByHeight = new ChainedBlock[0];
 							_BlocksById.Clear();
 							_Tip = null;
-							SetTipNoLock(new ChainedBlock(header, 0));
+							if(header != null && genesis != null && header.GetHash() != genesis.HashBlock)
+							{
+								throw new InvalidOperationException("Unexpected genesis block");
+							}
+							SetTipNoLock(new ChainedBlock(genesis?.Header ?? header, 0));
 						}
+						else if(!format.SerializeBlockHeader || 
+								(_Tip.HashBlock == header.HashPrevBlock && !(header.IsNull && header.Nonce == 0)))
+							SetTipNoLock(new ChainedBlock(header, id?.Value, Tip));
 						else
-							SetTipNoLock(new ChainedBlock(header, id.Value, Tip));
+							break;
 						height++;
 					}
 				}
@@ -89,18 +222,31 @@ namespace NBitcoin
 
 		public void WriteTo(Stream stream)
 		{
-			WriteTo(new BitcoinStream(stream, true));
+			WriteTo(stream, null);
+		}
+		public void WriteTo(Stream stream, ChainSerializationFormat format)
+		{
+			WriteTo(new BitcoinStream(stream, true), format);
 		}
 
 		public void WriteTo(BitcoinStream stream)
 		{
+			WriteTo(stream, null);
+		}
+
+		public void WriteTo(BitcoinStream stream, ChainSerializationFormat format)
+		{
+			format = format ?? new ChainSerializationFormat();
+			format.AssertCoherent();
 			using(@lock.LockRead())
 			{
 				for(int i = 0; i < Tip.Height + 1; i++)
 				{
 					var block = GetBlockNoLock(i);
-					stream.ReadWrite(block.HashBlock.AsBitcoinSerializable());
-					stream.ReadWrite(block.Header);
+					if(format.SerializePrecomputedBlockHash)
+						stream.ReadWrite(block.HashBlock.AsBitcoinSerializable());
+					if(format.SerializeBlockHeader)
+						stream.ReadWrite(block.Header);
 				}
 			}
 		}
@@ -115,10 +261,7 @@ namespace NBitcoin
 				{
 					chain._BlocksById.Add(kv.Key, kv.Value);
 				}
-				foreach(var kv in _BlocksByHeight)
-				{
-					chain._BlocksByHeight.Add(kv.Key, kv.Value);
-				}
+				chain._BlocksByHeight = _BlocksByHeight.ToArray();
 			}
 			return chain;
 		}
@@ -142,21 +285,19 @@ namespace NBitcoin
 			foreach(var orphaned in EnumerateThisToFork(block))
 			{
 				_BlocksById.Remove(orphaned.HashBlock);
-				_BlocksByHeight.Remove(orphaned.Height);
+				RemoveBlocksByHeight(orphaned.Height);
 				height--;
 			}
 			var fork = GetBlockNoLock(height);
 			foreach(var newBlock in block.EnumerateToGenesis()
-				.TakeWhile(c => c != Tip))
+				.TakeWhile(c => c != fork))
 			{
 				_BlocksById.AddOrReplace(newBlock.HashBlock, newBlock);
-				_BlocksByHeight.AddOrReplace(newBlock.Height, newBlock);
+				AddOrReplaceBlocksByHeight(newBlock.Height, newBlock);
 			}
 			_Tip = block;
 			return fork;
 		}
-
-
 
 		private IEnumerable<ChainedBlock> EnumerateThisToFork(ChainedBlock block)
 		{
@@ -202,8 +343,33 @@ namespace NBitcoin
 		private ChainedBlock GetBlockNoLock(int height)
 		{
 			ChainedBlock result;
-			_BlocksByHeight.TryGetValue(height, out result);
+			TryGetBlocksByHeight(height, out result);
 			return result;
+		}
+
+		private bool TryGetBlocksByHeight(int height, out ChainedBlock result)
+		{
+			result = null;
+			if(height >= _BlocksByHeight.Length || height < 0)
+				return false;
+			result = _BlocksByHeight[height];
+			return result != null;
+		}
+
+		private void RemoveBlocksByHeight(int height)
+		{
+			if(height >= _BlocksByHeight.Length)
+				return;
+			_BlocksByHeight[height] = null;
+		}
+
+		private void AddOrReplaceBlocksByHeight(int height, ChainedBlock newBlock)
+		{
+			while(height >= _BlocksByHeight.Length)
+			{
+				Array.Resize(ref _BlocksByHeight, (int)((_BlocksByHeight.Length + 100) * 1.1));
+			}
+			_BlocksByHeight[height] = newBlock;
 		}
 
 		public override ChainedBlock GetBlock(int height)
@@ -236,17 +402,18 @@ namespace NBitcoin
 
 		protected override IEnumerable<ChainedBlock> EnumerateFromStart()
 		{
-			using(@lock.LockRead())
+			int i = 0;
+			ChainedBlock block = null;
+			while(true)
 			{
-				int i = 0;
-				while(true)
+				using(@lock.LockRead())
 				{
-					var block = GetBlockNoLock(i);
+					block = GetBlockNoLock(i);
 					if(block == null)
 						yield break;
-					yield return block;
-					i++;
 				}
+				yield return block;
+				i++;
 			}
 		}
 

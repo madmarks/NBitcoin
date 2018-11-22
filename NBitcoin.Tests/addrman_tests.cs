@@ -24,7 +24,7 @@ namespace NBitcoin.Tests
 			addrman.SavePeerFile("CanSerializeDeserializePeerTable.dat", Network.Main);
 			AddressManager.LoadPeerFile("CanSerializeDeserializePeerTable.dat", Network.Main);
 
-			addrman = AddressManager.LoadPeerFile("../../data/peers.dat", Network.Main);
+			addrman = AddressManager.LoadPeerFile("../../../data/peers.dat", Network.Main);
 			addrman.DebugMode = true;
 			addrman.Check();
 			addrman.SavePeerFile("serializerPeer.dat", Network.Main);
@@ -61,7 +61,7 @@ namespace NBitcoin.Tests
 			addrman.Connected(localhost);
 
 			addr = addrman.Select();
-			Assert.True(addr.Ago < TimeSpan.FromSeconds(10.0));
+			Assert.True(addr.Ago < TimeSpan.FromSeconds(1.0));
 		}
 		[Fact]
 		[Trait("UnitTest", "UnitTest")]

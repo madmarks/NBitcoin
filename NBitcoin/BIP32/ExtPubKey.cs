@@ -12,17 +12,19 @@ namespace NBitcoin
 	{
 		public static ExtPubKey Parse(string wif, Network expectedNetwork = null)
 		{
-			return Network.CreateFromBase58Data<BitcoinExtPubKey>(wif, expectedNetwork).ExtPubKey;
+			return Network.Parse<BitcoinExtPubKey>(wif, expectedNetwork).ExtPubKey;
 		}
+
+		private const int FingerprintLength = 4;
+		private const int ChainCodeLength = 32;
 
 		static readonly byte[] validPubKey = Encoders.Hex.DecodeData("0374ef3990e387b5a2992797f14c031a64efd80e5cb843d7c1d4a0274a9bc75e55");
 		internal byte nDepth;
-		internal byte[] vchFingerprint = new byte[4];
+		internal byte[] vchFingerprint = new byte[FingerprintLength];
 		internal uint nChild;
 
-		//
 		internal PubKey pubkey = new PubKey(validPubKey);
-		internal byte[] vchChainCode = new byte[32];
+		internal byte[] vchChainCode = new byte[ChainCodeLength];
 
 		public byte Depth
 		{
@@ -58,8 +60,8 @@ namespace NBitcoin
 		{
 			get
 			{
-				byte[] chainCodeCopy = new byte[vchChainCode.Length];
-				Buffer.BlockCopy(vchChainCode, 0, chainCodeCopy, 0, vchChainCode.Length);
+				byte[] chainCodeCopy = new byte[ChainCodeLength];
+				Buffer.BlockCopy(vchChainCode, 0, chainCodeCopy, 0, ChainCodeLength);
 
 				return chainCodeCopy;
 			}
@@ -69,42 +71,53 @@ namespace NBitcoin
 		{
 		}
 
+		/// <summary>
+		/// Constructor. Creates a new extended public key from the specified extended public key bytes.
+		/// </summary>
 		public ExtPubKey(byte[] bytes)
 		{
 			if(bytes == null)
-				throw new ArgumentNullException("bytes");
-			this.ReadWrite(bytes);
+				throw new ArgumentNullException(nameof(bytes));
+			this.ReadWrite(new BitcoinStream(bytes));
+		}
+        
+		/// <summary>
+		/// Constructor. Creates a new extended public key from the specified extended public key bytes, from the given hex string.
+		/// </summary>
+		public ExtPubKey(string hex) 
+		    : this(Encoders.Hex.DecodeData(hex))
+		{
 		}
 
 		public ExtPubKey(PubKey pubkey, byte[] chainCode, byte depth, byte[] fingerprint, uint child)
 		{
 			if(pubkey == null)
-				throw new ArgumentNullException("pubkey");
+				throw new ArgumentNullException(nameof(pubkey));
 			if(chainCode == null)
-				throw new ArgumentNullException("chainCode");
+				throw new ArgumentNullException(nameof(chainCode));
 			if(fingerprint == null)
-				throw new ArgumentNullException("fingerprint");
-			if(fingerprint.Length != fingerprint.Length)
-				throw new ArgumentException(string.Format("The fingerprint must be {0} bytes.", fingerprint.Length), "fingerprint");
-			if(chainCode.Length != vchChainCode.Length)
-				throw new ArgumentException(string.Format("The chain code must be {0} bytes.", vchChainCode.Length), "chainCode");
+				throw new ArgumentNullException(nameof(fingerprint));
+			if(fingerprint.Length != FingerprintLength)
+				throw new ArgumentException(string.Format("The fingerprint must be {0} bytes.", FingerprintLength), "fingerprint");
+			if(chainCode.Length != ChainCodeLength)
+				throw new ArgumentException(string.Format("The chain code must be {0} bytes.", ChainCodeLength), "chainCode");
 			this.pubkey = pubkey;
 			this.nDepth = depth;
 			this.nChild = child;
-			Buffer.BlockCopy(fingerprint, 0, vchFingerprint, 0, vchFingerprint.Length);
-			Buffer.BlockCopy(chainCode, 0, vchChainCode, 0, vchChainCode.Length);
+			Buffer.BlockCopy(fingerprint, 0, vchFingerprint, 0, FingerprintLength);
+			Buffer.BlockCopy(chainCode, 0, vchChainCode, 0, ChainCodeLength);
 		}
 
 		public ExtPubKey(PubKey masterKey, byte[] chainCode)
 		{
 			if(masterKey == null)
-				throw new ArgumentNullException("masterKey");
+				throw new ArgumentNullException(nameof(masterKey));
 			if(chainCode == null)
-				throw new ArgumentNullException("chainCode");
-			if(chainCode.Length != vchChainCode.Length)
-				throw new ArgumentException(string.Format("The chain code must be {0} bytes.", vchChainCode.Length), "chainCode");
+				throw new ArgumentNullException(nameof(chainCode));
+			if(chainCode.Length != ChainCodeLength)
+				throw new ArgumentException(string.Format("The chain code must be {0} bytes.", ChainCodeLength), "chainCode");
 			this.pubkey = masterKey;
-			Buffer.BlockCopy(chainCode, 0, vchChainCode, 0, vchChainCode.Length);
+			Buffer.BlockCopy(chainCode, 0, vchChainCode, 0, ChainCodeLength);
 		}
 
 
@@ -120,7 +133,7 @@ namespace NBitcoin
 		}
 		public byte[] CalculateChildFingerprint()
 		{
-			return pubkey.Hash.ToBytes().SafeSubarray(0, vchFingerprint.Length);
+			return pubkey.Hash.ToBytes().SafeSubarray(0, FingerprintLength);
 		}
 
 		public byte[] Fingerprint

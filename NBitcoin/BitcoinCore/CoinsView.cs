@@ -7,12 +7,13 @@ using System.Threading.Tasks;
 
 namespace NBitcoin.BitcoinCore
 {
+	[Obsolete]
 	public class CoinsView
 	{
 		public CoinsView(NoSqlRepository index)
 		{
 			if(index == null)
-				throw new ArgumentNullException("index");
+				throw new ArgumentNullException(nameof(index));
 			_Index = index;
 		}
 
@@ -32,15 +33,7 @@ namespace NBitcoin.BitcoinCore
 
 		public Coins GetCoins(uint256 txId)
 		{
-			try
-			{
-				return Index.GetAsync<Coins>(txId.ToString()).Result;
-			}
-			catch(AggregateException aex)
-			{
-				ExceptionDispatchInfo.Capture(aex.InnerException).Throw();
-				return null; //Can't happen
-			}
+			return Index.GetAsync<Coins>(txId.ToString()).GetAwaiter().GetResult();
 		}
 
 		public Task<Coins> GetCoinsAsync(uint256 txId)
@@ -61,15 +54,7 @@ namespace NBitcoin.BitcoinCore
 
 		public uint256 GetBestBlock()
 		{
-			try
-			{
-				return GetBestBlockAsync().Result;
-			}
-			catch(AggregateException aex)
-			{
-				ExceptionDispatchInfo.Capture(aex.InnerException).Throw();
-				return null; //Can't happen
-			}
+			return GetBestBlockAsync().GetAwaiter().GetResult();
 		}
 		public async Task<uint256> GetBestBlockAsync()
 		{
@@ -109,11 +94,7 @@ namespace NBitcoin.BitcoinCore
 		public TxOut GetOutputFor(TxIn input)
 		{
 			Coins coins = GetCoins(input.PrevOut.Hash);
-			if(!coins.IsAvailable(input.PrevOut.N))
-			{
-				return null;
-			}
-			return coins.Outputs[(int)input.PrevOut.N];
+			return coins.TryGetOutput(input.PrevOut.N);
 		}
 
 		public Money GetValueIn(Transaction tx)

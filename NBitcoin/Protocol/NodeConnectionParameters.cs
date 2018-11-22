@@ -16,14 +16,17 @@ namespace NBitcoin.Protocol
 
 		public NodeConnectionParameters()
 		{
-			ReuseBuffer = true;
 			TemplateBehaviors.Add(new PingPongBehavior());
-			Version = ProtocolVersion.PROTOCOL_VERSION;
+			Version = null;
 			IsRelay = true;
 			Services = NodeServices.Nothing;
 			ConnectCancellation = default(CancellationToken);
-			ReceiveBufferSize = 1000 * 5000;
-			SendBufferSize = 1000 * 1000;
+
+			// Use max supported by MAC OSX Yosemite/Mavericks/Sierra (https://fasterdata.es.net/host-tuning/osx/)
+			ReceiveBufferSize = 1048576; 
+			SendBufferSize = 1048576;
+			////////////////////////
+
 			UserAgent = VersionPayload.GetNBitcoinUserAgent();
 			PreferredTransactionOptions = TransactionOptions.All;
 		}
@@ -38,15 +41,12 @@ namespace NBitcoin.Protocol
 			ConnectCancellation = other.ConnectCancellation;
 			UserAgent = other.UserAgent;
 			AddressFrom = other.AddressFrom;
-			IsTrusted = other.IsTrusted;
 			Nonce = other.Nonce;
 			Advertize = other.Advertize;
-			ReuseBuffer = other.ReuseBuffer;
 			PreferredTransactionOptions = other.PreferredTransactionOptions;
-
 			foreach(var behavior in other.TemplateBehaviors)
 			{
-				TemplateBehaviors.Add((NodeBehavior)((ICloneable)behavior).Clone());
+				TemplateBehaviors.Add(behavior.Clone());
 			}
 		}
 
@@ -58,7 +58,8 @@ namespace NBitcoin.Protocol
 			get;
 			set;
 		}
-		public ProtocolVersion Version
+
+		public uint? Version
 		{
 			get;
 			set;
@@ -74,14 +75,6 @@ namespace NBitcoin.Protocol
 		}
 
 		public NodeServices Services
-		{
-			get;
-			set;
-		}
-		/// <summary>
-		/// If true, then no proof of work is checked on incoming headers, if null, will trust localhost
-		/// </summary>
-		public bool? IsTrusted
 		{
 			get;
 			set;
@@ -112,6 +105,7 @@ namespace NBitcoin.Protocol
 		/// <summary>
 		/// Whether we reuse a 1MB buffer for deserializing messages, for limiting GC activity (Default : true)
 		/// </summary>
+		[Obsolete("Ignored, all arrays are allocated through ArrayPool")]
 		public bool ReuseBuffer
 		{
 			get;
@@ -155,7 +149,7 @@ namespace NBitcoin.Protocol
 			{
 				Nonce = Nonce == null ? RandomUtils.GetUInt64() : Nonce.Value,
 				UserAgent = UserAgent,
-				Version = Version,
+				Version = Version == null ? network.MaxP2PVersion : Version.Value,
 				Timestamp = DateTimeOffset.UtcNow,
 				AddressReceiver = peer,
 				AddressFrom = AddressFrom ?? new IPEndPoint(IPAddress.Parse("0.0.0.0").MapToIPv6Ex(), network.DefaultPort),

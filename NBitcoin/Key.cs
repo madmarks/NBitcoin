@@ -13,16 +13,16 @@ namespace NBitcoin
 
 		public static Key Parse(string wif, Network network = null)
 		{
-			return Network.CreateFromBase58Data<BitcoinSecret>(wif, network).PrivateKey;
+			return Network.Parse<BitcoinSecret>(wif, network).PrivateKey;
 		}
 
 		public static Key Parse(string wif, string password, Network network = null)
 		{
-			return Network.CreateFromBase58Data<BitcoinEncryptedSecret>(wif, network).GetKey(password);
+			return Network.Parse<BitcoinEncryptedSecret>(wif, network).GetKey(password);
 		}
 
 		byte[] vch = new byte[0];
-		ECKey _ECKey;
+		internal ECKey _ECKey;
 		public bool IsCompressed
 		{
 			get;
@@ -51,14 +51,14 @@ namespace NBitcoin
 				count = data.Length;
 			if(count != KEY_SIZE)
 			{
-				throw new FormatException("The size of an EC key should be 32");
+				throw new ArgumentException(paramName:"data", message: $"The size of an EC key should be {KEY_SIZE}");
 			}
 			if(Check(data))
 			{
 				SetBytes(data, count, fCompressedIn);
 			}
 			else
-				throw new FormatException("Invalid EC key");
+				throw new ArgumentException(paramName: "data", message: "Invalid EC key");
 		}
 
 		private void SetBytes(byte[] data, int count, bool fCompressedIn)
@@ -70,7 +70,7 @@ namespace NBitcoin
 
 		private static bool Check(byte[] vch)
 		{
-			var candidateKey = new uint256(vch.SafeSubarray(0, KEY_SIZE));
+			var candidateKey = new uint256(vch.SafeSubarray(0, KEY_SIZE), false);
 			return candidateKey > 0 && candidateKey < N;
 		}
 
@@ -174,7 +174,7 @@ namespace NBitcoin
 				throw new InvalidOperationException("You won a prize ! this should happen very rarely. Take a screenshot, and roll the dice again.");
 			var key = parse256LL.Add(kPar).Mod(N);
 			if(key == BigInteger.Zero)
-				throw new InvalidOperationException("You won the big prize ! this would happen only 1 in 2^127. Take a screenshot, and roll the dice again.");
+				throw new InvalidOperationException("You won the big prize ! this has probability lower than 1 in 2^127. Take a screenshot, and roll the dice again.");
 
 			var keyBytes = key.ToByteArrayUnsigned();
 			if(keyBytes.Length < 32)
@@ -237,6 +237,33 @@ namespace NBitcoin
 		public TransactionSignature Sign(uint256 hash, SigHash sigHash)
 		{
 			return new TransactionSignature(Sign(hash), sigHash);
+		}
+
+
+		public override bool Equals(object obj)
+		{
+			Key item = obj as Key;
+			if(item == null)
+				return false;
+			return PubKey.Equals(item.PubKey);
+		}
+		public static bool operator ==(Key a, Key b)
+		{
+			if(System.Object.ReferenceEquals(a, b))
+				return true;
+			if(((object)a == null) || ((object)b == null))
+				return false;
+			return a.PubKey == b.PubKey;
+		}
+
+		public static bool operator !=(Key a, Key b)
+		{
+			return !(a == b);
+		}
+
+		public override int GetHashCode()
+		{
+			return PubKey.GetHashCode();
 		}
 	}
 }

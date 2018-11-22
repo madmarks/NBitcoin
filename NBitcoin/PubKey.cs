@@ -1,4 +1,4 @@
-﻿using NBitcoin.Crypto;
+using NBitcoin.Crypto;
 using NBitcoin.DataEncoders;
 using NBitcoin.Stealth;
 using NBitcoin.BouncyCastle.Math;
@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NBitcoin.BouncyCastle.Math.EC;
 
 namespace NBitcoin
 {
@@ -33,11 +34,11 @@ namespace NBitcoin
 		/// Create a new Public key from byte array
 		/// </summary>
 		/// <param name="bytes">byte array</param>
-		/// <param name="unsafe">If false, make internal copy of bytes and does perform only a costly check for PubKey format. If true, the bytes array is used as is and only PubKey.QuickCheck is used for validating the format. </param>	 
+		/// <param name="unsafe">If false, make internal copy of bytes and does perform only a costly check for PubKey format. If true, the bytes array is used as is and only PubKey.Check is used for validating the format. </param>	 
 		public PubKey(byte[] bytes, bool @unsafe)
 		{
 			if(bytes == null)
-				throw new ArgumentNullException("bytes");
+				throw new ArgumentNullException(nameof(bytes));
 			if(!Check(bytes, false))
 			{
 				throw new FormatException("Invalid public key");
@@ -59,7 +60,7 @@ namespace NBitcoin
 		}
 
 		ECKey _ECKey;
-		private ECKey ECKey
+		internal ECKey ECKey
 		{
 			get
 			{
@@ -162,11 +163,6 @@ namespace NBitcoin
 			return new BitcoinScriptAddress(redeem.Hash, network);
 		}
 
-		public BitcoinWitPubKeyAddress GetSegwitAddress(Network network)
-		{
-			return new BitcoinWitPubKeyAddress(new WitKeyId(this.Hash), network);
-		}
-
 
 		public bool Verify(uint256 hash, ECDSASignature sig)
 		{
@@ -228,10 +224,20 @@ namespace NBitcoin
 		/// <returns>True if signatures is valid</returns>
 		public bool VerifyMessage(byte[] messageBytes, string signature)
 		{
-			var sig = DecodeSigString(signature);
-			var messageSigned = Utils.FormatMessageForSigning(messageBytes);
-			var hash = Hashes.Hash256(messageSigned);
-			return ECKey.Verify(hash, sig);
+			return VerifyMessage(messageBytes, DecodeSigString(signature));
+		}
+
+		/// <summary>
+		/// Verify message signed using signmessage from bitcoincore
+		/// </summary>
+		/// <param name="message">The message</param>
+		/// <param name="signature">The signature</param>
+		/// <returns>True if signatures is valid</returns>
+		public bool VerifyMessage(byte[] message, ECDSASignature signature)
+		{
+			var messageToSign = Utils.FormatMessageForSigning(message);
+			var hash = Hashes.Hash256(messageToSign);
+			return ECKey.Verify(hash, signature);
 		}
 
 		/// <summary>
@@ -267,6 +273,12 @@ namespace NBitcoin
 			return RecoverCompact(hash, signatureEncoded);
 		}
 
+		public static PubKey RecoverFromMessage(byte[] messageBytes, byte[] signatureEncoded)
+		{
+			var message = Utils.FormatMessageForSigning(messageBytes);
+			var hash = Hashes.Hash256(message);
+			return RecoverCompact(hash, signatureEncoded);
+		}
 
 		public static PubKey RecoverCompact(uint256 hash, byte[] signatureEncoded)
 		{
@@ -417,6 +429,41 @@ namespace NBitcoin
 				}
 				return _ScriptPubKey;
 			}
+		}
+
+		/// <summary>
+		/// Exchange shared secret through ECDH
+		/// </summary>
+		/// <param name="key">Private key</param>
+		/// <returns>Shared secret</returns>
+		[Obsolete("Use GetSharedPubkey instead")]
+		public byte[] GetSharedSecret(Key key)
+		{
+			return Hashes.SHA256(GetSharedPubkey(key).ToBytes());
+		}
+
+		/// <summary>
+		/// Exchange shared secret through ECDH
+		/// </summary>
+		/// <param name="key">Private key</param>
+		/// <returns>Shared pubkey</returns>
+		public PubKey GetSharedPubkey(Key key)
+		{
+			var pub = _ECKey.GetPublicKeyParameters();
+			var privKey = key._ECKey.PrivateKey;
+			if(!pub.Parameters.Equals(privKey.Parameters))
+				throw new InvalidOperationException("ECDH public key has wrong domain parameters");
+			ECPoint q = pub.Q.Multiply(privKey.D).Normalize();
+			if(q.IsInfinity)
+				throw new InvalidOperationException("Infinity is not a valid agreement value for ECDH");
+			var pubkey = ECKey.Secp256k1.Curve.CreatePoint(q.XCoord.ToBigInteger(), q.YCoord.ToBigInteger());
+			pubkey = pubkey.Normalize();
+			return new ECKey(pubkey.GetEncoded(true), false).GetPubKey(true);
+		}
+
+		public BitcoinWitPubKeyAddress GetSegwitAddress(Network network)
+		{
+			return new BitcoinWitPubKeyAddress(WitHash, network);
 		}
 
 		#endregion

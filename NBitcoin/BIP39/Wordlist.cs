@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -79,6 +80,17 @@ namespace NBitcoin
 			}
 		}
 
+		private static Wordlist _PortugueseBrazil;
+		public static Wordlist PortugueseBrazil
+		{
+			get
+			{
+				if (_PortugueseBrazil == null)
+					_PortugueseBrazil = LoadWordList(Language.PortugueseBrazil).Result;
+				return _PortugueseBrazil;
+			}
+		}
+
 		public static Task<Wordlist> LoadWordList(Language language)
 		{
 			string name = GetLanguageFileName(language);
@@ -108,6 +120,9 @@ namespace NBitcoin
 				case Language.French:
 					name = "french";
 					break;
+				case Language.PortugueseBrazil:
+					name = "portuguese_brazil";
+					break;
 				default:
 					throw new NotSupportedException(language.ToString());
 			}
@@ -118,7 +133,7 @@ namespace NBitcoin
 		public static async Task<Wordlist> LoadWordList(string name)
 		{
 			if(name == null)
-				throw new ArgumentNullException("name");
+				throw new ArgumentNullException(nameof(name));
 			Wordlist result = null;
 			lock(_LoadedLists)
 			{
@@ -228,7 +243,7 @@ namespace NBitcoin
 		}
 		public static Language AutoDetectLanguage(string[] words)
 		{
-			List<int> languageCount = new List<int>(new int[] { 0, 0, 0, 0, 0, 0 });
+			List<int> languageCount = new List<int>(new int[] { 0, 0, 0, 0, 0, 0, 0 });
 			int index;
 
 			foreach(string s in words)
@@ -265,6 +280,12 @@ namespace NBitcoin
 				if(Wordlist.French.WordExists(s, out index))
 				{
 					languageCount[5]++;
+				}
+
+				if (Wordlist.PortugueseBrazil.WordExists(s, out index))
+				{
+					//portuguese_brazil is at 6
+					languageCount[6]++;
 				}
 			}
 
@@ -304,6 +325,10 @@ namespace NBitcoin
 			{
 				return Language.French;
 			}
+			else if (languageCount.IndexOf(languageCount.Max()) == 6)
+			{
+				return Language.PortugueseBrazil;
+			}
 			return Language.Unknown;
 		}
 		public static Language AutoDetectLanguage(string sentence)
@@ -321,6 +346,11 @@ namespace NBitcoin
 		public override string ToString()
 		{
 			return _Name;
+		}
+
+		public ReadOnlyCollection<string> GetWords()
+		{
+			return new ReadOnlyCollection<string>(_words);
 		}
 
 		public string[] GetWords(int[] indices)

@@ -35,7 +35,18 @@ namespace NBitcoin.Protocol
 			}
 		}
 	}
-	public class NodesCollection : IEnumerable<Node>
+
+	public interface IReadOnlyNodesCollection : IEnumerable<Node>
+    {
+		event EventHandler<NodeEventArgs> Added;
+		event EventHandler<NodeEventArgs> Removed;
+
+		Node FindByEndpoint(IPEndPoint endpoint);
+		Node FindByIp(IPAddress ip);
+		Node FindLocal();
+	}
+
+	public class NodesCollection : IEnumerable<Node>, IReadOnlyNodesCollection
 	{
 		class Bridge : MessageListener<IncomingMessage>
 		{
@@ -80,7 +91,7 @@ namespace NBitcoin.Protocol
 		public bool Add(Node node)
 		{
 			if(node == null)
-				throw new ArgumentNullException("node");
+				throw new ArgumentNullException(nameof(node));
 			if(_Nodes.TryAdd(node, node))
 			{
 				node.MessageProducer.AddMessageListener(bridge);
@@ -112,7 +123,7 @@ namespace NBitcoin.Protocol
 				added(this, new NodeEventArgs(node, true));
 		}
 
-		public void OnNodeRemoved(Node node)
+		private void OnNodeRemoved(Node node)
 		{
 			var removed = Removed;
 			if(removed != null)

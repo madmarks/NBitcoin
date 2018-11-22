@@ -33,7 +33,18 @@ namespace NBitcoin
 		{
 			get;
 		}
+
+		/// <summary>
+		/// Returns the script actually signed and executed
+		/// </summary>
+		/// <exception cref="System.InvalidOperationException">Additional information needed to get the ScriptCode</exception>
+		/// <returns>The executed script</returns>
 		Script GetScriptCode();
+		void OverrideScriptCode(Script scriptCode);
+		bool CanGetScriptCode
+		{
+			get;
+		}
 		HashVersion GetHashVersion();
 	}
 
@@ -177,9 +188,22 @@ namespace NBitcoin
 			return this.Bearer.GetScriptCode();
 		}
 
+		public bool CanGetScriptCode
+		{
+			get
+			{
+				return this.Bearer.CanGetScriptCode;
+			}
+		}
+
 		public HashVersion GetHashVersion()
 		{
 			return this.Bearer.GetHashVersion();
+		}
+
+		public void OverrideScriptCode(Script scriptCode)
+		{
+			this.Bearer.OverrideScriptCode(scriptCode);
 		}
 
 		#endregion
@@ -201,9 +225,9 @@ namespace NBitcoin
 			: this(entry.Asset, new Coin(tx, entry.Index))
 		{
 			if(tx == null)
-				throw new ArgumentNullException("tx");
+				throw new ArgumentNullException(nameof(tx));
 			if(entry == null)
-				throw new ArgumentNullException("entry");
+				throw new ArgumentNullException(nameof(entry));
 		}
 
 		public AssetId AssetId
@@ -274,9 +298,9 @@ namespace NBitcoin
 		public static IEnumerable<ColoredCoin> Find(uint256 txId, Transaction tx, ColoredTransaction colored)
 		{
 			if(colored == null)
-				throw new ArgumentNullException("colored");
+				throw new ArgumentNullException(nameof(colored));
 			if(tx == null)
-				throw new ArgumentNullException("tx");
+				throw new ArgumentNullException(nameof(tx));
 			if(txId == null)
 				txId = tx.GetHash();
 			foreach(var entry in colored.Issuances.Concat(colored.Transfers))
@@ -349,9 +373,22 @@ namespace NBitcoin
 			return this.Bearer.GetScriptCode();
 		}
 
+		public bool CanGetScriptCode
+		{
+			get
+			{
+				return this.Bearer.CanGetScriptCode;
+			}
+		}
+
 		public HashVersion GetHashVersion()
 		{
 			return this.Bearer.GetHashVersion();
+		}
+
+		public void OverrideScriptCode(Script scriptCode)
+		{
+			this.Bearer.OverrideScriptCode(scriptCode);
 		}
 
 		#endregion
@@ -371,7 +408,7 @@ namespace NBitcoin
 		public Coin(Transaction fromTx, uint fromOutputIndex)
 		{
 			if(fromTx == null)
-				throw new ArgumentNullException("fromTx");
+				throw new ArgumentNullException(nameof(fromTx));
 			Outpoint = new OutPoint(fromTx, fromOutputIndex);
 			TxOut = fromTx.Outputs[fromOutputIndex];
 		}
@@ -379,9 +416,9 @@ namespace NBitcoin
 		public Coin(Transaction fromTx, TxOut fromOutput)
 		{
 			if(fromTx == null)
-				throw new ArgumentNullException("fromTx");
+				throw new ArgumentNullException(nameof(fromTx));
 			if(fromOutput == null)
-				throw new ArgumentNullException("fromOutput");
+				throw new ArgumentNullException(nameof(fromOutput));
 			uint outputIndex = (uint)fromTx.Outputs.FindIndex(r => Object.ReferenceEquals(fromOutput, r));
 			Outpoint = new OutPoint(fromTx, outputIndex);
 			TxOut = fromOutput;
@@ -400,10 +437,22 @@ namespace NBitcoin
 
 		public virtual Script GetScriptCode()
 		{
+			if(!CanGetScriptCode)
+				throw new InvalidOperationException("You need to provide P2WSH or P2SH redeem script with Coin.ToScriptCoin()");
+			if(_OverrideScriptCode != null)
+				return _OverrideScriptCode;
 			var key = PayToWitPubKeyHashTemplate.Instance.ExtractScriptPubKeyParameters(ScriptPubKey);
 			if(key != null)
-				return key.WitScriptPubKey;
+				return key.AsKeyId().ScriptPubKey;
 			return ScriptPubKey;
+		}
+
+		public virtual bool CanGetScriptCode
+		{
+			get
+			{
+				return _OverrideScriptCode != null || !ScriptPubKey.IsPayToScriptHash && !PayToWitScriptHashTemplate.Instance.CheckScriptPubKey(ScriptPubKey);
+			}
 		}
 
 		public virtual HashVersion GetHashVersion()
@@ -416,7 +465,7 @@ namespace NBitcoin
 		public ScriptCoin ToScriptCoin(Script redeemScript)
 		{
 			if(redeemScript == null)
-				throw new ArgumentNullException("redeemScript");
+				throw new ArgumentNullException(nameof(redeemScript));
 			var scriptCoin = this as ScriptCoin;
 			if(scriptCoin != null)
 				return scriptCoin;
@@ -454,12 +503,27 @@ namespace NBitcoin
 		{
 			get
 			{
+				if(TxOut == null)
+					return Money.Zero;
 				return TxOut.Value;
 			}
 			set
 			{
+				EnsureTxOut();
 				TxOut.Value = value;
 			}
+		}
+
+		private void EnsureTxOut()
+		{
+			if(TxOut == null)
+				TxOut = new TxOut();
+		}
+
+		protected Script _OverrideScriptCode;
+		public void OverrideScriptCode(Script scriptCode)
+		{
+			_OverrideScriptCode = scriptCode;
 		}
 
 		#endregion
@@ -468,10 +532,13 @@ namespace NBitcoin
 		{
 			get
 			{
+				if(TxOut == null)
+					return Script.Empty;
 				return TxOut.ScriptPubKey;
 			}
 			set
 			{
+				EnsureTxOut();
 				TxOut.ScriptPubKey = value;
 			}
 		}
@@ -636,11 +703,24 @@ namespace NBitcoin
 
 		public override Script GetScriptCode()
 		{
+			if(!CanGetScriptCode)
+				throw new InvalidOperationException("You need to provide the P2WSH redeem script with ScriptCoin.ToScriptCoin()");
+			if(_OverrideScriptCode != null)
+				return _OverrideScriptCode;
 			var key = PayToWitPubKeyHashTemplate.Instance.ExtractScriptPubKeyParameters(Redeem);
 			if(key != null)
-				return key.WitScriptPubKey;
+				return key.AsKeyId().ScriptPubKey;
 			return Redeem;
 		}
+
+		public override bool CanGetScriptCode
+		{
+			get
+			{
+				return _OverrideScriptCode != null || !IsP2SH || !PayToWitScriptHashTemplate.Instance.CheckScriptPubKey(Redeem);
+			}
+		}
+
 		public override HashVersion GetHashVersion()
 		{
 			var isWitness = PayToWitTemplate.Instance.CheckScriptPubKey(ScriptPubKey) ||
@@ -657,7 +737,7 @@ namespace NBitcoin
 		public static TxDestination GetRedeemHash(Script scriptPubKey)
 		{
 			if(scriptPubKey == null)
-				throw new ArgumentNullException("scriptPubKey");
+				throw new ArgumentNullException(nameof(scriptPubKey));
 			return PayToScriptHashTemplate.Instance.ExtractScriptPubKeyParameters(scriptPubKey) as TxDestination
 					??
 					PayToWitScriptHashTemplate.Instance.ExtractScriptPubKeyParameters(scriptPubKey);
@@ -696,6 +776,8 @@ namespace NBitcoin
 
 		public override Script GetScriptCode()
 		{
+			if(_OverrideScriptCode != null)
+				return _OverrideScriptCode;
 			if(Redeem == null)
 				return base.GetScriptCode();
 			else

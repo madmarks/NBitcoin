@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 namespace NBitcoin.BitcoinCore
 {
+	[Obsolete]
 	public abstract class IndexedStore<TStoredItem, TItem>
 		where TStoredItem : StoredItem<TItem>
 		where TItem : IBitcoinSerializable, new()
@@ -33,9 +34,9 @@ namespace NBitcoin.BitcoinCore
 		protected IndexedStore(NoSqlRepository index, Store<TStoredItem, TItem> store)
 		{
 			if(index == null)
-				throw new ArgumentNullException("index");
+				throw new ArgumentNullException(nameof(index));
 			if(store == null)
-				throw new ArgumentNullException("store");
+				throw new ArgumentNullException(nameof(store));
 			_Index = index;
 			_Store = store;
 		}
@@ -44,15 +45,7 @@ namespace NBitcoin.BitcoinCore
 
 		public int ReIndex()
 		{
-			try
-			{
-				return ReIndexAsync().Result;
-			}
-			catch(AggregateException aex)
-			{
-				ExceptionDispatchInfo.Capture(aex.InnerException).Throw();
-				return 0; //Can't happen
-			}
+			return ReIndexAsync().GetAwaiter().GetResult();
 		}
 
 		public async Task<int> ReIndexAsync()
@@ -60,7 +53,9 @@ namespace NBitcoin.BitcoinCore
 			var last = await _Index.GetAsync<DiskBlockPos>(IndexedLimit).ConfigureAwait(false);
 			int count = 0;
 			List<TStoredItem> lastBlocks = null;
+#pragma warning disable CS0612 // Type or member is obsolete
 			foreach(var blocks in EnumerateForIndex(new DiskBlockPosRange(last)).Partition(400))
+#pragma warning restore CS0612 // Type or member is obsolete
 			{
 				count += blocks.Count;
 				await _Index.PutBatch(blocks.Select(b => new Tuple<String, IBitcoinSerializable>(GetKey(b.Item), b.BlockPosition))).ConfigureAwait(false);
@@ -76,15 +71,7 @@ namespace NBitcoin.BitcoinCore
 
 		public TItem Get(string key)
 		{
-			try
-			{
-				return GetAsync(key).Result;
-			}
-			catch(AggregateException aex)
-			{
-				ExceptionDispatchInfo.Capture(aex.InnerException).Throw();
-				return default(TItem); //Can't happen
-			}
+			return GetAsync(key).GetAwaiter().GetResult();
 		}
 
 		public async Task<TItem> GetAsync(string key)
@@ -94,7 +81,9 @@ namespace NBitcoin.BitcoinCore
 			var pos = await Index.GetAsync<DiskBlockPos>(key).ConfigureAwait(false);
 			if(pos == null)
 				return default(TItem);
+#pragma warning disable CS0612 // Type or member is obsolete
 			var stored = EnumerateForGet(new DiskBlockPosRange(pos)).FirstOrDefault();
+#pragma warning restore CS0612 // Type or member is obsolete
 			if(stored == null)
 				return default(TItem);
 			return stored.Item;
@@ -110,8 +99,12 @@ namespace NBitcoin.BitcoinCore
 
 		protected abstract string GetKey(TItem item);
 
+#pragma warning disable CS0612 // Type or member is obsolete
 		protected abstract IEnumerable<TStoredItem> EnumerateForIndex(DiskBlockPosRange range);
+#pragma warning restore CS0612 // Type or member is obsolete
+#pragma warning disable CS0612 // Type or member is obsolete
 		protected abstract IEnumerable<TStoredItem> EnumerateForGet(DiskBlockPosRange range);
+#pragma warning restore CS0612 // Type or member is obsolete
 	}
 }
 #endif

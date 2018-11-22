@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace NBitcoin
 {
@@ -16,7 +13,7 @@ namespace NBitcoin
 		public UnsignedList(Transaction parent)
 		{
 			if(parent == null)
-				throw new ArgumentNullException("parent");
+				throw new ArgumentNullException(nameof(parent));
 			Transaction = parent;
 		}
 

@@ -52,7 +52,7 @@ namespace NBitcoin.Tests
 		[Trait("Core", "Core")]
 		public void sighash_from_data()
 		{
-			var tests = TestCase.read_json("Data/sighash.json");
+			var tests = TestCase.read_json("data/sighash.json");
 
 			foreach(var test in tests)
 			{
@@ -67,7 +67,7 @@ namespace NBitcoin.Tests
 
 				string raw_tx, raw_script, sigHashHex;
 				int nIn, nHashType;
-				Transaction tx = new Transaction();
+				Transaction tx = Network.Main.CreateTransaction();
 				Script scriptCode = new Script();
 
 
@@ -79,19 +79,12 @@ namespace NBitcoin.Tests
 				sigHashHex = (string)test[4];
 
 
-				tx.ReadWrite(ParseHex(raw_tx));
-
-
-				ValidationState state = Network.Main.CreateValidationState();
-				Assert.True(state.CheckTransaction(tx), strTest);
-				Assert.True(state.IsValid);
+				tx.ReadWrite(ParseHex(raw_tx), Network.Main);
 
 				var raw = ParseHex(raw_script);
 				scriptCode = new Script(raw);
 
-
-
-				var sh = Script.SignatureHash(scriptCode, tx, nIn, (SigHash)nHashType);
+				var sh = tx.GetSignatureHash(scriptCode, nIn, (SigHash)nHashType);
 				Assert.True(sh.ToString() == sigHashHex, strTest);
 			}
 		}

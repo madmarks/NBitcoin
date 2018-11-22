@@ -4,7 +4,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Numerics;
 
 namespace NBitcoin
 {
@@ -60,17 +59,39 @@ namespace NBitcoin
 		DiscourageUpgradableWitnessProgram,
 		WitnessProgramWrongLength,
 		WitnessUnexpected,
+		NullFail,
+		MinimalIf,
+		WitnessPubkeyType,
 	}
 
 	public class TransactionChecker
 	{
-		public TransactionChecker(Transaction tx, int index, Money amount = null)
+		public TransactionChecker(Transaction tx, int index, TxOut spentOutput, PrecomputedTransactionData precomputedTransactionData)
 		{
 			if(tx == null)
-				throw new ArgumentNullException("tx");
+				throw new ArgumentNullException(nameof(tx));
 			_Transaction = tx;
 			_Index = index;
-			_Amount = amount;
+			_SpentOutput = spentOutput;
+			_PrecomputedTransactionData = precomputedTransactionData;
+		}
+		public TransactionChecker(Transaction tx, int index, TxOut spentOutput = null)
+		{
+			if(tx == null)
+				throw new ArgumentNullException(nameof(tx));
+			_Transaction = tx;
+			_Index = index;
+			_SpentOutput = spentOutput;
+		}
+
+
+		private readonly PrecomputedTransactionData _PrecomputedTransactionData;
+		public PrecomputedTransactionData PrecomputedTransactionData
+		{
+			get
+			{
+				return _PrecomputedTransactionData;
+			}
 		}
 
 		private readonly Transaction _Transaction;
@@ -99,12 +120,12 @@ namespace NBitcoin
 			}
 		}
 
-		private readonly Money _Amount;
-		public Money Amount
+		private readonly TxOut _SpentOutput;
+		public TxOut SpentOutput
 		{
 			get
 			{
-				return _Amount;
+				return _SpentOutput;
 			}
 		}
 	}
@@ -403,9 +424,17 @@ namespace NBitcoin
 			get;
 			set;
 		}
+
+		[Obsolete("Use VerifyScript(Script scriptSig, Transaction txTo, int nIn, TxOut spentOutput) instead")]
 		public bool VerifyScript(Script scriptSig, Script scriptPubKey, Transaction txTo, int nIn, Money value)
 		{
-			return VerifyScript(scriptSig, scriptPubKey, new TransactionChecker(txTo, nIn, value));
+			TxOut txOut = txTo.Outputs.CreateNewTxOut(value, scriptPubKey);
+			return VerifyScript(scriptSig, scriptPubKey, new TransactionChecker(txTo, nIn, txOut));
+		}
+
+		public bool VerifyScript(Script scriptSig, Transaction txTo, int nIn, TxOut spentOutput)
+		{
+			return VerifyScript(scriptSig, spentOutput.ScriptPubKey, new TransactionChecker(txTo, nIn, spentOutput));
 		}
 
 		public bool VerifyScript(Script scriptSig, Script scriptPubKey, TransactionChecker checker)
@@ -510,6 +539,8 @@ namespace NBitcoin
 				// would be possible, which is not a softfork (and P2SH should be one).
 				if((ScriptVerify & ScriptVerify.P2SH) == 0)
 					throw new InvalidOperationException("ScriptVerify : CleanStack without P2SH is not allowed");
+				if((ScriptVerify & ScriptVerify.Witness) == 0)
+					throw new InvalidOperationException("ScriptVerify : CleanStack without Witness is not allowed");
 				if(Stack.Count != 1)
 					return SetError(ScriptError.CleanStack);
 			}
@@ -824,6 +855,15 @@ namespace NBitcoin
 											return SetError(ScriptError.UnbalancedConditional);
 
 										var vch = _stack.Top(-1);
+
+										if(hashversion == (int)HashVersion.Witness && (ScriptVerify & ScriptVerify.MinimalIf) != 0)
+										{
+											if(vch.Length > 1)
+												return SetError(ScriptError.MinimalIf);
+											if(vch.Length == 1 && vch[0] != 1)
+												return SetError(ScriptError.MinimalIf);
+										}
+
 										bValue = CastToBool(vch);
 										if(opcode.Code == OpcodeType.OP_NOTIF)
 											bValue = !bValue;
@@ -1061,7 +1101,7 @@ namespace NBitcoin
 										return SetError(ScriptError.InvalidStackOperation);
 
 									var vch = _stack.Top(-1);
-									_stack.Insert(0, vch);
+									_stack.Insert(-3, vch);
 									break;
 								}
 							case OpcodeType.OP_SIZE:
@@ -1295,15 +1335,18 @@ namespace NBitcoin
 									// Subset of script starting at the most recent codeseparator
 									var scriptCode = new Script(s._Script.Skip(pbegincodehash).ToArray());
 									// Drop the signature, since there's no way for a signature to sign itself
-									scriptCode.FindAndDelete(vchSig);
+									if(hashversion == (int)HashVersion.Original)
+										scriptCode = scriptCode.FindAndDelete(vchSig);
 
-									if(!CheckSignatureEncoding(vchSig) || !CheckPubKeyEncoding(vchPubKey))
+									if(!CheckSignatureEncoding(vchSig) || !CheckPubKeyEncoding(vchPubKey, hashversion))
 									{
 										//serror is set
 										return false;
 									}
 
 									bool fSuccess = CheckSig(vchSig, vchPubKey, scriptCode, checker, hashversion);
+									if(!fSuccess && (ScriptVerify & ScriptVerify.NullFail) != 0 && vchSig.Length != 0)
+										return SetError(ScriptError.NullFail);
 
 									_stack.Pop();
 									_stack.Pop();
@@ -1336,6 +1379,9 @@ namespace NBitcoin
 
 									int ikey = ++i;
 									i += nKeysCount;
+									// ikey2 is the position of last non-signature item in the stack. Top stack item = 1.
+									// With SCRIPT_VERIFY_NULLFAIL, this is used for cleanup if operation fails.
+									int ikey2 = nKeysCount + 2;
 									if(_stack.Count < i)
 										return SetError(ScriptError.InvalidStackOperation);
 
@@ -1354,7 +1400,8 @@ namespace NBitcoin
 									for(int k = 0; k < nSigsCount; k++)
 									{
 										var vchSig = _stack.Top(-isig - k);
-										scriptCode.FindAndDelete(vchSig);
+										if(hashversion == (int)HashVersion.Original)
+											scriptCode = scriptCode.FindAndDelete(vchSig);
 									}
 
 									bool fSuccess = true;
@@ -1366,7 +1413,7 @@ namespace NBitcoin
 										// Note how this makes the exact order of pubkey/signature evaluation
 										// distinguishable by CHECKMULTISIG NOT if the STRICTENC flag is set.
 										// See the script_(in)valid tests for details.
-										if(!CheckSignatureEncoding(vchSig) || !CheckPubKeyEncoding(vchPubKey))
+										if(!CheckSignatureEncoding(vchSig) || !CheckPubKeyEncoding(vchPubKey, hashversion))
 										{
 											// serror is set
 											return false;
@@ -1388,7 +1435,16 @@ namespace NBitcoin
 											fSuccess = false;
 									}
 
-									_stack.Clear(i - 1);
+									// Clean up stack of actual arguments
+									while(i-- > 1)
+									{
+										// If the operation failed, we require that all signatures must be empty vector
+										if(!fSuccess && (ScriptVerify & ScriptVerify.NullFail) != 0 && ikey2 == 0 && _stack.Top(-1).Length != 0)
+											return SetError(ScriptError.NullFail);
+										if(ikey2 > 0)
+											ikey2--;
+										_stack.Pop();
+									}
 
 									// A bug causes CHECKMULTISIG to consume one extra argument
 									// whose contents were not checked in any way.
@@ -1593,17 +1649,37 @@ namespace NBitcoin
 			return true;
 		}
 
-		private bool CheckPubKeyEncoding(byte[] vchPubKey)
+		private bool CheckPubKeyEncoding(byte[] vchPubKey, int sigversion)
 		{
 			if((ScriptVerify & ScriptVerify.StrictEnc) != 0 && !IsCompressedOrUncompressedPubKey(vchPubKey))
 			{
 				Error = ScriptError.PubKeyType;
 				return false;
 			}
+			if((ScriptVerify & ScriptVerify.WitnessPubkeyType) != 0 && sigversion == (int)HashVersion.Witness && !IsCompressedPubKey(vchPubKey))
+			{
+				return SetError(ScriptError.WitnessPubkeyType);
+			}
 			return true;
 		}
 
-		static bool IsDefinedHashtypeSignature(byte[] vchSig)
+		static bool IsCompressedPubKey(byte[] vchPubKey)
+		{
+			if(vchPubKey.Length != 33)
+			{
+				//  Non-canonical public key: invalid length for compressed key
+				return false;
+			}
+			if(vchPubKey[0] != 0x02 && vchPubKey[0] != 0x03)
+			{
+				//  Non-canonical public key: invalid prefix for compressed key
+				return false;
+			}
+			return true;
+		}
+
+
+		bool IsDefinedHashtypeSignature(byte[] vchSig)
 		{
 			if(vchSig.Length == 0)
 			{
@@ -1611,6 +1687,10 @@ namespace NBitcoin
 			}
 
 			var temp = ~(SigHash.AnyoneCanPay);
+			if((ScriptVerify & ScriptVerify.ForkId) != 0)
+			{
+				temp = (SigHash)((uint)temp & ~(0x40u));
+			}
 			byte nHashType = (byte)(vchSig[vchSig.Length - 1] & (byte)temp);
 			if(nHashType < (byte)SigHash.All || nHashType > (byte)SigHash.Single)
 				return false;
@@ -1890,7 +1970,7 @@ namespace NBitcoin
 			if(!IsAllowedSignature(scriptSig.SigHash))
 				return false;
 
-			uint256 sighash = Script.SignatureHash(scriptCode, checker.Transaction, checker.Index, scriptSig.SigHash, checker.Amount, (HashVersion)sigversion);
+			uint256 sighash = checker.Transaction.GetSignatureHash(scriptCode, checker.Index, scriptSig.SigHash, checker.SpentOutput, (HashVersion)sigversion, checker.PrecomputedTransactionData);
 			_SignedHashes.Add(new SignedHash()
 			{
 				ScriptCode = scriptCode,
@@ -2081,10 +2161,13 @@ namespace NBitcoin
 		public void Insert(int position, T value)
 		{
 			EnsureSize();
-			var newArray = new T[_array.Length];
-			Array.Copy(_array, position, newArray, position + 1, _position - position + 1);
-			_array = newArray;
-			_array[position] = value;
+
+			position = Count + position;
+			for(int i = _position; i >= position + 1; i--)
+			{
+				_array[i + 1] = _array[i];
+			}
+			_array[position + 1] = value;
 			_position++;
 		}
 
@@ -2104,14 +2187,13 @@ namespace NBitcoin
 		/// <param name="to">The item position</param>
 		public void Remove(int from, int to)
 		{
-			var dest = new T[_array.Length];
-			var f = Count + from;
-			var t = Count + to;
-			var diff = t - f;
-			Array.Copy(_array, 0, dest, 0, f);
-			Array.Copy(_array, t, dest, f, _position - diff + 1);
-			_array = dest;
-			_position -= diff;
+			int toRemove = to - from;
+			for(int i = Count + from; i < Count + from + toRemove; i++)
+			{
+				for(int y = Count + from; y < Count; y++)
+					_array[y] = _array[y + 1];
+			}
+			_position -= toRemove;
 		}
 
 		private void EnsureSize()

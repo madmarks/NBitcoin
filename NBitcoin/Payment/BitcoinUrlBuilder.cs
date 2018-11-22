@@ -27,13 +27,13 @@ namespace NBitcoin.Payment
 			: this(uri.AbsoluteUri)
 		{
 			if(uri == null)
-				throw new ArgumentNullException("uri");
+				throw new ArgumentNullException(nameof(uri));
 		}
 
 		public BitcoinUrlBuilder(string uri)
 		{
 			if(uri == null)
-				throw new ArgumentNullException("uri");
+				throw new ArgumentNullException(nameof(uri));
 			if(!uri.StartsWith("bitcoin:", StringComparison.OrdinalIgnoreCase))
 				throw new FormatException("Invalid scheme");
 			uri = uri.Remove(0, "bitcoin:".Length);
@@ -51,7 +51,7 @@ namespace NBitcoin.Payment
 			}
 			if(address != String.Empty)
 			{
-				Address = Network.CreateFromBase58Data<BitcoinAddress>(address);
+				Address = Network.Parse<BitcoinAddress>(address, null);
 			}
 			uri = uri.Remove(0, address.Length);
 
@@ -103,15 +103,8 @@ namespace NBitcoin.Payment
 		{
 			if(PaymentRequestUrl == null)
 				throw new InvalidOperationException("No PaymentRequestUrl specified");
-			try
-			{
-				return GetPaymentRequestAsync().Result;
-			}
-			catch(AggregateException aex)
-			{
-				ExceptionDispatchInfo.Capture(aex.InnerException).Throw();
-				return null;
-			}
+			
+			return GetPaymentRequestAsync().GetAwaiter().GetResult();
 		}
 		public async Task<PaymentRequest> GetPaymentRequestAsync(HttpClient httpClient = null)
 		{
@@ -230,7 +223,7 @@ namespace NBitcoin.Payment
 					builder.Append("&");
 				builder.Append(parameter.Key);
 				builder.Append("=");
-				builder.Append(HttpUtility.UrlEncode(parameter.Value));
+				builder.Append(System.Web.NBitcoin.HttpUtility.UrlEncode(parameter.Value));
 			}
 		}
 

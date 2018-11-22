@@ -154,8 +154,8 @@ namespace NBitcoin
 	{
 
 		public BitcoinPassphraseCode(string passphrase, Network network, LotSequence lotsequence, byte[] ownersalt = null)
-			: base(GenerateWif(passphrase, network, lotsequence, ownersalt), network)
 		{
+			Init<BitcoinPassphraseCode>(GenerateWif(passphrase, network, lotsequence, ownersalt), network);
 		}
 		private static string GenerateWif(string passphrase, Network network, LotSequence lotsequence, byte[] ownersalt)
 		{
@@ -182,17 +182,17 @@ namespace NBitcoin
 			var passpoint = new Key(passfactor, fCompressedIn: true).PubKey.ToBytes();
 
 			var bytes =
-				network.GetVersionBytes(Base58Type.PASSPHRASE_CODE)
+				network.GetVersionBytes(Base58Type.PASSPHRASE_CODE, true)
 				.Concat(new[] { hasLotSequence ? (byte)0x51 : (byte)0x53 })
 				.Concat(ownerEntropy)
 				.Concat(passpoint)
 				.ToArray();
-			return Encoders.Base58Check.EncodeData(bytes);
+			return network.NetworkStringParser.GetBase58CheckEncoder().EncodeData(bytes);
 		}
 
 		public BitcoinPassphraseCode(string wif, Network expectedNetwork = null)
-			: base(wif, expectedNetwork)
 		{
+			Init<BitcoinPassphraseCode>(wif, expectedNetwork);
 		}
 
 		LotSequence _LotSequence;
@@ -268,14 +268,14 @@ namespace NBitcoin
 				var encryptedpointb = new byte[] { pointbprefix }.Concat(pointbx).ToArray();
 
 				var confirmBytes =
-					Network.GetVersionBytes(Base58Type.CONFIRMATION_CODE)
+					Network.GetVersionBytes(Base58Type.CONFIRMATION_CODE, true)
 					.Concat(new[] { flagByte })
 					.Concat(addresshash)
 					.Concat(OwnerEntropy)
 					.Concat(encryptedpointb)
 					.ToArray();
 
-				return new BitcoinConfirmationCode(Encoders.Base58Check.EncodeData(confirmBytes), Network);
+				return new BitcoinConfirmationCode(Network.NetworkStringParser.GetBase58CheckEncoder().EncodeData(confirmBytes), Network);
 			});
 		}
 

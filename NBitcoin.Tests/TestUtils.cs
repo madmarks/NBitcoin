@@ -11,6 +11,7 @@ namespace NBitcoin.Tests
 {
 	class TestUtils
 	{
+
 		public static void Eventually(Func<bool> act)
 		{
 			var cancel = new CancellationTokenSource(20000);
@@ -38,7 +39,7 @@ namespace NBitcoin.Tests
 
 		public static Block CreateFakeBlock(Transaction tx)
 		{
-			var block = new Block();
+			Block block = Network.Main.Consensus.ConsensusFactory.CreateBlock();
 			block.AddTransaction(tx);
 			block.UpdateMerkleRoot();
 			return block;
@@ -46,7 +47,7 @@ namespace NBitcoin.Tests
 
 		public static Block CreateFakeBlock()
 		{
-			var block = TestUtils.CreateFakeBlock(new Transaction());
+			var block = TestUtils.CreateFakeBlock(Network.Main.CreateTransaction());
 			block.Header.HashPrevBlock = new uint256(RandomUtils.GetBytes(32));
 			block.Header.Nonce = RandomUtils.GetUInt32();
 			return block;

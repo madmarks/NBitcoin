@@ -1,8 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace NBitcoin
 {
@@ -11,7 +7,13 @@ namespace NBitcoin
 		internal const uint LOCKTIME_THRESHOLD = 500000000; // Tue Nov  5 00:53:20 1985 UTC
 		uint _value;
 
-
+		public static LockTime Zero
+		{
+			get
+			{
+				return new LockTime((uint)0);
+			}
+		}
 		public LockTime(DateTimeOffset dateTime)
 		{
 			_value = Utils.DateTimeToUnixTime(dateTime);

@@ -42,6 +42,12 @@ namespace NBitcoin.Protocol
 		/// witness data. 
 		/// </summary> 
 		NODE_WITNESS = (1 << 3),
+
+		/// <summary> NODE_NETWORK_LIMITED means the same as NODE_NETWORK with the limitation of only
+		/// serving the last 288 (2 day) blocks
+		/// See BIP159 for details on how this is implemented.
+		/// </summary> 
+		NODE_NETWORK_LIMITED = (1 << 10)
 	}
 	[Payload("version")]
 	public class VersionPayload : Payload, IBitcoinSerializable
@@ -57,7 +63,7 @@ namespace NBitcoin.Protocol
 				var version = package.Id.Version;
 				_NUserAgent = "/NBitcoin:" + version.Major + "." + version.Minor + "." + version.Build + "/";
 #else
-#if !NETCORE
+#if !NETSTANDARD1X
 				var version = typeof(VersionPayload).Assembly.GetName().Version;
 #else
 				var version = typeof(VersionPayload).GetTypeInfo().Assembly.GetName().Version;
@@ -70,19 +76,15 @@ namespace NBitcoin.Protocol
 		}
 		uint version;
 
-		public ProtocolVersion Version
+		public uint Version
 		{
 			get
 			{
-				if(version == 10300) //A version number of 10300 is converted to 300 before being processed
-					return (ProtocolVersion)(300);  //https://en.bitcoin.it/wiki/Version_Handshake
-				return (ProtocolVersion)version;
+				return version;
 			}
 			set
 			{
-				if(value == (ProtocolVersion)10300)
-					value = (ProtocolVersion)300;
-				version = (uint)value;
+				version = value;
 			}
 		}
 		ulong services;
@@ -195,23 +197,23 @@ namespace NBitcoin.Protocol
 		public override void ReadWriteCore(BitcoinStream stream)
 		{
 			stream.ReadWrite(ref version);
-			using(stream.ProtocolVersionScope((ProtocolVersion)version))
+			using(stream.ProtocolVersionScope(version))
 			{
 				stream.ReadWrite(ref services);
 				stream.ReadWrite(ref timestamp);
-				using(stream.ProtocolVersionScope(ProtocolVersion.CADDR_TIME_VERSION - 1)) //No time field in version message
+				using(stream.SerializationTypeScope(SerializationType.Hash)) //No time field in version message
 				{
 					stream.ReadWrite(ref addr_recv);
 				}
 				if(version >= 106)
 				{
-					using(stream.ProtocolVersionScope(ProtocolVersion.CADDR_TIME_VERSION - 1)) //No time field in version message
+					using(stream.SerializationTypeScope(SerializationType.Hash)) //No time field in version message
 					{
 						stream.ReadWrite(ref addr_from);
 					}
 					stream.ReadWrite(ref nonce);
 					stream.ReadWrite(ref user_agent);
-					if(version < 60002)
+					if(!stream.ProtocolCapabilities.SupportUserAgent)
 						if(user_agent.Length != 0)
 							throw new FormatException("Should not find user agent for current version " + version);
 					stream.ReadWrite(ref start_height);

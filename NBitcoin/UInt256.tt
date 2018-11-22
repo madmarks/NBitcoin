@@ -15,6 +15,7 @@ namespace NBitcoin
 {
 <# foreach (string t in new []{ "256","160" }) { 
 	int WIDTH = int.Parse(t) / 32;
+	int WIDTH_BYTE = int.Parse(t) / 8; 
 #>
 	public class uint<#= t #>
 	{
@@ -26,6 +27,10 @@ namespace NBitcoin
 				get
 				{
 					return _Value;
+				}
+				set
+				{
+					_Value = value;
 				}
 			}
 			public MutableUint<#= t #>()
@@ -82,7 +87,7 @@ namespace NBitcoin
 		public static bool TryParse(string hex, out uint<#= t #> result)
 		{
 			if(hex == null)
-				throw new ArgumentNullException("hex");
+				throw new ArgumentNullException(nameof(hex));
 			if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
 				hex = hex.Substring(2);
 			result = null;
@@ -136,7 +141,7 @@ internal readonly UInt32 pn<#= i #>;
 		{
 			if (vch.Length != WIDTH_BYTE)
 			{
-				throw new FormatException("the byte array should be <#= t #> byte long");
+				throw new FormatException("the byte array should be <#= WIDTH_BYTE #> bytes long");
 			}
 
 			if(!lendian)
@@ -264,7 +269,7 @@ str = str.Trim();
 			return new MutableUint<#= t #>(this);
 		}
 		
-		public int GetSerializeSize(int nType=0, ProtocolVersion protocolVersion = ProtocolVersion.PROTOCOL_VERSION)
+		public int GetSerializeSize(int nType=0, uint? protocolVersion = null)
 		{
 			return WIDTH_BYTE;
 		}

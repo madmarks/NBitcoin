@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 
 namespace NBitcoin.BitcoinCore
 {
+	[Obsolete]
 	public class DiskBlockPosRange
 	{
 		private static DiskBlockPosRange _All = new DiskBlockPosRange(DiskBlockPos.Begin, DiskBlockPos.End);
@@ -63,7 +64,7 @@ namespace NBitcoin.BitcoinCore
 			return Begin + " <= x < " + End;
 		}
 	}
-	public class DiskBlockPos : IBitcoinSerializable
+	public class DiskBlockPos : IBitcoinSerializable, IEquatable<DiskBlockPos>
 	{
 		private static DiskBlockPos _Begin = new DiskBlockPos(0, 0);
 
@@ -130,12 +131,14 @@ namespace NBitcoin.BitcoinCore
 
 		#endregion
 
-		public override bool Equals(object obj)
+        public bool Equals(DiskBlockPos other)
+        {
+            return this == other; //Uses operator ==
+        }
+
+        public override bool Equals(object obj)
 		{
-			DiskBlockPos item = obj as DiskBlockPos;
-			if(item == null)
-				return false;
-			return _Hash.Equals(item._Hash);
+            return this == (obj as DiskBlockPos); //Uses operator ==
 		}
 		public static bool operator ==(DiskBlockPos a, DiskBlockPos b)
 		{
@@ -143,7 +146,7 @@ namespace NBitcoin.BitcoinCore
 				return true;
 			if(((object)a == null) || ((object)b == null))
 				return false;
-			return a._Hash == b._Hash;
+			return a.File == b.File && a.Position == b.Position;
 		}
 
 		public static bool operator !=(DiskBlockPos a, DiskBlockPos b)
@@ -192,7 +195,7 @@ namespace NBitcoin.BitcoinCore
 		}
 
 		static readonly Regex _Reg = new Regex("f:([0-9]*)p:([0-9]*)"
-#if !PORTABLE
+#if !NETSTANDARD1X
 			, RegexOptions.Compiled
 #endif
 			);
@@ -236,7 +239,9 @@ namespace NBitcoin.BitcoinCore
 				BlockHeader header = item == null ? null : item.Header;
 				stream.ReadWrite(ref header);
 				if(!stream.Serializing)
+#pragma warning disable CS0618 // Type or member is obsolete
 					item = new Block(header);
+#pragma warning restore CS0618 // Type or member is obsolete
 
 				var headerSize = stream.Inner.Position - beforeReading;
 				var bodySize = this.Header.ItemSize - headerSize;
@@ -254,15 +259,19 @@ namespace NBitcoin.BitcoinCore
 
 		#endregion
 #if !NOFILEIO
+#pragma warning disable CS0612 // Type or member is obsolete
 		public static IEnumerable<StoredBlock> EnumerateFile(string file, uint fileIndex = 0, DiskBlockPosRange range = null)
 		{
 			return new BlockStore(Path.GetDirectoryName(file), Network.Main).EnumerateFile(file, fileIndex, range);
 		}
+#pragma warning restore CS0612 // Type or member is obsolete
 
+#pragma warning disable CS0612 // Type or member is obsolete
 		public static IEnumerable<StoredBlock> EnumerateFolder(string folder, DiskBlockPosRange range = null)
 		{
 			return new BlockStore(folder, Network.Main).EnumerateFolder(range);
 		}
+#pragma warning restore CS0612 // Type or member is obsolete
 #endif
 	}
 }

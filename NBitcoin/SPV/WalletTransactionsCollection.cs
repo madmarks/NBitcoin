@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 namespace NBitcoin.SPV
 {
+	[Obsolete]
 	public class WalletTransactionsCollection : IEnumerable<WalletTransaction>
 	{
 		public WalletTransactionsCollection(WalletTransaction[] walletTransactions)
@@ -55,8 +56,20 @@ namespace NBitcoin.SPV
 
 					var immatures = _All.Where(o => o.Transaction.IsCoinBase && o.BlockInformation.Confirmations < 101).ToArray();
 					summary.Immature = new WalletSummaryDetails(immatures);
-					var unconf = _All.Where(o => o.BlockInformation == null).ToArray();
-					summary.UnConfirmed = new WalletSummaryDetails(unconf);
+					var unconf = _All.Where(o => o.BlockInformation == null).ToList();
+					var unconfConflict = new List<WalletTransaction>();
+					Dictionary<OutPoint, OutPoint> spent = new Dictionary<OutPoint, OutPoint>();
+					foreach(var tx in unconf)
+					{
+						foreach(var o in tx.Transaction.Inputs.Select(i => i.PrevOut))
+						{
+							if(!spent.TryAdd(o, o))
+							{
+								unconfConflict.Add(tx);
+							}
+						}
+					}
+					summary.UnConfirmed = new WalletSummaryDetails(unconf.Where(u => !unconfConflict.Contains(u)).ToArray());
 					summary.Confirmed = new WalletSummaryDetails(_All.Where(o => o.BlockInformation != null).ToArray());
 					summary.Spendable = summary.UnConfirmed + summary.Confirmed - summary.Immature;
 					_Summary = summary;
@@ -67,7 +80,7 @@ namespace NBitcoin.SPV
 
 		public IEnumerable<Coin> GetSpendableCoins()
 		{
-			var spent = _All.SelectMany(o => o.SpentCoins.Select(c => c.Outpoint)).ToDictionary(o => o);
+			var spent = _All.SelectMany(o => o.SpentCoins.Select(c => c.Outpoint)).Distinct().ToDictionary(o => o);
 			return _All
 					.Where(o => !o.Transaction.IsCoinBase || o.BlockInformation.Confirmations >= 101)
 					.SelectMany(o => o.ReceivedCoins)

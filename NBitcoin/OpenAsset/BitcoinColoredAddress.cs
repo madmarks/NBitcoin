@@ -10,8 +10,8 @@ namespace NBitcoin
 	public class BitcoinColoredAddress : Base58Data, IDestination
 	{
 		public BitcoinColoredAddress(string base58, Network expectedNetwork = null)
-			: base(base58, expectedNetwork)
 		{
+			Init<BitcoinColoredAddress>(base58, expectedNetwork);
 		}
 
 		public BitcoinColoredAddress(BitcoinAddress address)
@@ -22,9 +22,17 @@ namespace NBitcoin
 
 		private static byte[] Build(BitcoinAddress address)
 		{
-			var version = address.Network.GetVersionBytes(address.Type);
-			var data = address.ToBytes();
-			return version.Concat(data).ToArray();
+			if(address is IBase58Data)
+			{
+				var b58 = (IBase58Data)address;
+				var version = address.Network.GetVersionBytes(b58.Type, true);
+				var data = address.Network.NetworkStringParser.GetBase58CheckEncoder().DecodeData(b58.ToString()).Skip(version.Length).ToArray();
+				return version.Concat(data).ToArray();
+			}
+			else
+			{
+				throw new NotSupportedException("Building a colored address out of a non base58 string is not supported");
+			}
 		}
 
 		protected override bool IsValid
@@ -42,7 +50,7 @@ namespace NBitcoin
 			{
 				if(_Address == null)
 				{
-					var base58 = Encoders.Base58Check.EncodeData(vchData);
+					var base58 = Network.NetworkStringParser.GetBase58CheckEncoder().EncodeData(vchData);
 					_Address = BitcoinAddress.Create(base58, Network);
 				}
 				return _Address;
@@ -71,10 +79,10 @@ namespace NBitcoin
 
 		public static string GetWrappedBase58(string base58, Network network)
 		{
-			var coloredVersion = network.GetVersionBytes(Base58Type.COLORED_ADDRESS);
-			var inner = Encoders.Base58Check.DecodeData(base58);
+			var coloredVersion = network.GetVersionBytes(Base58Type.COLORED_ADDRESS, true);
+			var inner = network.NetworkStringParser.GetBase58CheckEncoder().DecodeData(base58);
 			inner = inner.Skip(coloredVersion.Length).ToArray();
-			return Encoders.Base58Check.EncodeData(inner);
+			return network.NetworkStringParser.GetBase58CheckEncoder().EncodeData(inner);
 		}
 	}
 }

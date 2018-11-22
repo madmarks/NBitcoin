@@ -6,6 +6,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using NBitcoin.Logging;
 
 namespace NBitcoin.Crypto
 {
@@ -40,6 +42,23 @@ namespace NBitcoin.Crypto
 		}
 
 		public ECDSASignature(byte[] derSig)
+		{
+			try
+			{
+				Asn1InputStream decoder = new Asn1InputStream(derSig);
+				var seq = decoder.ReadObject() as DerSequence;
+				if(seq == null || seq.Count != 2)
+					throw new FormatException(InvalidDERSignature);
+				_R = ((DerInteger)seq[0]).Value;
+				_S = ((DerInteger)seq[1]).Value;
+			}
+			catch(Exception ex)
+			{
+				throw new FormatException(InvalidDERSignature, ex);
+			}
+		}
+
+		public ECDSASignature(Stream derSig)
 		{
 			try
 			{
@@ -99,6 +118,14 @@ namespace NBitcoin.Crypto
 			}
 		}
 
+		public bool IsLowR
+		{
+			get
+			{
+				var rBytes = this.R.ToByteArrayUnsigned();
+				return rBytes[0] < 0x80;
+			}
+		}
 
 
 		public static bool IsValidDER(byte[] bytes)
@@ -112,9 +139,8 @@ namespace NBitcoin.Crypto
 			{
 				return false;
 			}
-			catch(Exception ex)
+			catch(Exception)
 			{
-				Utils.error("Unexpected exception in ECDSASignature.IsValidDER " + ex.Message);
 				return false;
 			}
 		}

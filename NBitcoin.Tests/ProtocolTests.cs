@@ -1,6 +1,7 @@
 ﻿#if !NOSOCKET
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -13,17 +14,21 @@ using System.IO;
 using NBitcoin.DataEncoders;
 using System.Net.Sockets;
 using NBitcoin.Protocol.Behaviors;
-using System.Diagnostics;
+using NBitcoin.Logging;
+using NBitcoin.Tests.Helpers;
+using Xunit.Abstractions;
+using Xunit.Sdk;
 
 namespace NBitcoin.Tests
 {
 	public class NodeServerTester : IDisposable
 	{
 		static Random _Rand = new Random();
-		public NodeServerTester(Network network = null)
+		public NodeServerTester()
 		{
 			int retry = 0;
-			network = network ?? Network.TestNet;
+			var network = Network.RegTest;
+			Network = network;
 			while(true)
 			{
 				try
@@ -53,6 +58,11 @@ namespace NBitcoin.Tests
 						throw;
 				}
 			}
+		}
+
+		public Network Network
+		{
+			get; set;
 		}
 
 		public IEnumerable<Node> ConnectedNodes
@@ -109,25 +119,43 @@ namespace NBitcoin.Tests
 		{
 			_Server1.Dispose();
 			_Server2.Dispose();
+			foreach(var dispo in _Disposables)
+				dispo.Dispose();
 		}
 
 		#endregion
 
 		public static string NATRuleName = "NBitcoin Tests";
+
+		List<IDisposable> _Disposables = new List<IDisposable>();
+		internal void AddDisposable(IDisposable disposable)
+		{
+			_Disposables.Add(disposable);
+		}
 	}
 	public class ProtocolTests
 	{
+
 		[Fact]
 		[Trait("UnitTest", "UnitTest")]
 		//Copied from https://en.bitcoin.it/wiki/Protocol_specification (19/04/2014)
 		public void CanParseMessages()
 		{
-			var EST = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+			TimeZoneInfo EST;
+			try
+			{
+				EST = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+			}
+			catch(TimeZoneNotFoundException)
+			{
+				EST = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+			}
+
 			var tests = new[]
 				{
 					new
 					{
-						Version = ProtocolVersion.INIT_PROTO_VERSION,
+						Version = 209U,
 						Message = "f9beb4d976657273696f6e0000000000550000009c7c00000100000000000000e615104d00000000010000000000000000000000000000000000ffff0a000001208d010000000000000000000000000000000000ffff0a000002208ddd9d202c3ab457130055810100",
 						Test = new Action<object>(o=>
 						{
@@ -137,12 +165,12 @@ namespace NBitcoin.Tests
 							Assert.Equal("::ffff:10.0.0.2", version.AddressFrom.Address.ToString());
 							Assert.Equal(8333, version.AddressFrom.Port);
 							Assert.Equal(0x00018155, version.StartHeight);
-							Assert.Equal((ProtocolVersion)31900, version.Version);
+							Assert.Equal<uint>(31900, version.Version);
 						})
 					},
 					new
 					{
-						Version = ProtocolVersion.MEMPOOL_GD_VERSION,
+						Version = 60002U,
 						Message = "f9beb4d976657273696f6e000000000064000000358d493262ea0000010000000000000011b2d05000000000010000000000000000000000000000000000ffff000000000000000000000000000000000000000000000000ffff0000000000003b2eb35d8ce617650f2f5361746f7368693a302e372e322fc03e0300",
 						Test = new Action<object>(o=>
 						{
@@ -153,7 +181,7 @@ namespace NBitcoin.Tests
 					},
 					new
 					{
-						Version = ProtocolVersion.PROTOCOL_VERSION,
+						Version = 70012U,
 						Message = "f9beb4d976657261636b000000000000000000005df6e0e2",
 						Test = new Action<object>(o=>
 							{
@@ -162,12 +190,12 @@ namespace NBitcoin.Tests
 					},
 					new
 					{
-						Version = ProtocolVersion.MEMPOOL_GD_VERSION,
+						Version = 60002U,
 						Message = "f9beb4d96164647200000000000000001f000000ed52399b01e215104d010000000000000000000000000000000000ffff0a000001208d",
 						Test = new Action<object>(o=>
 							{
 								var addr = (AddrPayload)o;
-								Assert.Equal(1, addr.Addresses.Length);
+								Assert.Single(addr.Addresses);
 								//"Mon Dec 20 21:50:10 EST 2010"
 								var date = TimeZoneInfo.ConvertTime(addr.Addresses[0].Time,EST);
 								Assert.Equal(20,date.Day);
@@ -196,7 +224,7 @@ namespace NBitcoin.Tests
 		[Trait("Protocol", "Protocol")]
 		public void CanHandshake()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var seed = builder.CreateNode(true).CreateNodeClient();
 				Assert.True(seed.State == NodeState.Connected);
@@ -204,6 +232,91 @@ namespace NBitcoin.Tests
 				Assert.True(seed.State == NodeState.HandShaked);
 				seed.Disconnect();
 				Assert.True(seed.State == NodeState.Offline);
+				Assert.NotNull(seed.TimeOffset);
+			}
+		}
+
+		[Fact]
+		[Trait("Protocol", "Protocol")]
+		public void CanHandshakeWithSeveralTemplateBehaviors()
+		{
+			using(var builder = NodeBuilderEx.Create())
+			{
+				var node = builder.CreateNode(true);
+				node.Generate(101);
+				AddressManager manager = new AddressManager();
+				manager.Add(new NetworkAddress(node.NodeEndpoint), IPAddress.Loopback);
+
+				var chain = new SlimChain(builder.Network.GenesisHash);
+				NodesGroup group = new NodesGroup(builder.Network, new NodeConnectionParameters()
+				{
+					Services = NodeServices.Nothing,
+					IsRelay = true,
+					TemplateBehaviors =
+				{
+					new AddressManagerBehavior(manager)
+					{
+						PeersToDiscover = 1,
+						Mode = AddressManagerBehaviorMode.None
+					},
+					new SlimChainBehavior(chain),
+					new PingPongBehavior()
+				}
+				});
+				group.AllowSameGroup = true;
+				group.MaximumNodeConnection = 1;
+				var connecting = WaitConnected(group);
+				try
+				{
+
+					group.Connect();
+					connecting.GetAwaiter().GetResult();
+					Eventually(() =>
+					{
+						Assert.Equal(101, chain.Height);
+					});
+					var ms = new MemoryStream();
+					chain.Save(ms);
+
+					var chain2 = new SlimChain(chain.Genesis);
+					ms.Position = 0;
+					chain2.Load(ms);
+					Assert.Equal(chain.Tip, chain2.Tip);
+
+					using(var fs = new FileStream("test.slim.dat", FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024))
+					{
+						chain.Save(fs);
+						fs.Flush();
+					}
+
+					chain.ResetToGenesis();
+					using(var fs = new FileStream("test.slim.dat", FileMode.Open, FileAccess.Read, FileShare.None, 1024 * 1024))
+					{
+						chain.Load(fs);
+					}
+					Assert.Equal(101, chain2.Height);
+					chain.ResetToGenesis();
+				}
+				finally
+				{
+					group.Disconnect();
+				}
+			}
+		}
+		private static async Task WaitConnected(NodesGroup group)
+		{
+			TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>();
+			EventHandler<NodeEventArgs> waitingConnected = null;
+			waitingConnected = (a, b) =>
+			{
+				tcs.TrySetResult(true);
+				group.ConnectedNodes.Added -= waitingConnected;
+			};
+			group.ConnectedNodes.Added += waitingConnected;
+			CancellationTokenSource cts = new CancellationTokenSource(5000);
+			using(cts.Token.Register(() => tcs.TrySetCanceled()))
+			{
+				await tcs.Task;
 			}
 		}
 
@@ -211,46 +324,53 @@ namespace NBitcoin.Tests
 		[Trait("Protocol", "Protocol")]
 		public void CanGetMerkleRoot()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
-				var node = builder.CreateNode(true).CreateNodeClient();
-				builder.Nodes[0].Generate(101);
-				var rpc = builder.Nodes[0].CreateRPCClient();
-				builder.Nodes[0].Split(Money.Coins(50m), 50);
-				builder.Nodes[0].SelectMempoolTransactions();
-				builder.Nodes[0].Generate(1);
+				var node = builder.CreateNode(true);
+				var rpc = node.CreateRPCClient();
+				var nodeClient = node.CreateNodeClient();
+				rpc.Generate(101);
+
+				List<TxDestination> knownAddresses = new List<TxDestination>();
+				var batch = rpc.PrepareBatch();
 				for(int i = 0; i < 20; i++)
 				{
-					rpc.SendToAddress(new Key().PubKey.GetAddress(rpc.Network), Money.Coins(0.5m));
+					var address = new Key().PubKey.GetAddress(rpc.Network);
+					knownAddresses.Add(address.Hash);
+#pragma warning disable CS4014
+					batch.SendToAddressAsync(address, Money.Coins(0.5m));
+#pragma warning restore CS4014
 				}
-				builder.Nodes[0].SelectMempoolTransactions();
-				builder.Nodes[0].Generate(1);
-				var block = builder.Nodes[0].CreateRPCClient().GetBlock(103);
-				var knownTx = block.Transactions[0].GetHash();
-				var knownAddress = block.Transactions[0].Outputs[0].ScriptPubKey.GetDestination();
-				node.VersionHandshake();
-				using(var list = node.CreateListener()
+				batch.SendBatch();
+				knownAddresses = knownAddresses.Take(10).ToList();
+				var blockId = rpc.Generate(1)[0];
+				var block = rpc.GetBlock(blockId);
+				Assert.Equal(21, block.Transactions.Count);
+				var knownTx = block.Transactions[1].GetHash();
+				nodeClient.VersionHandshake();
+				using(var list = nodeClient.CreateListener()
 										.Where(m => m.Message.Payload is MerkleBlockPayload || m.Message.Payload is TxPayload))
 				{
-					BloomFilter filter = new BloomFilter(1, 0.005, 50, BloomFlags.UPDATE_NONE);
-					filter.Insert(knownAddress.ToBytes());
-					node.SendMessageAsync(new FilterLoadPayload(filter));
-					node.SendMessageAsync(new GetDataPayload(new InventoryVector(InventoryType.MSG_FILTERED_BLOCK, block.GetHash())));
+					BloomFilter filter = new BloomFilter(1, 0.0001, 50, BloomFlags.UPDATE_NONE);
+					foreach(var a in knownAddresses)
+						filter.Insert(a.ToBytes());
+					nodeClient.SendMessageAsync(new FilterLoadPayload(filter));
+					nodeClient.SendMessageAsync(new GetDataPayload(new InventoryVector(InventoryType.MSG_FILTERED_BLOCK, block.GetHash())));
 					var merkle = list.ReceivePayload<MerkleBlockPayload>();
 					var tree = merkle.Object.PartialMerkleTree;
 					Assert.True(tree.Check(block.Header.HashMerkleRoot));
-					Assert.True(tree.GetMatchedTransactions().Count() > 1);
-					Assert.True(tree.GetMatchedTransactions().Contains(knownTx));
+					Assert.True(tree.GetMatchedTransactions().Count() >= 10);
+					Assert.Contains(knownTx, tree.GetMatchedTransactions());
 
 					List<Transaction> matched = new List<Transaction>();
 					for(int i = 0; i < tree.GetMatchedTransactions().Count(); i++)
 					{
 						matched.Add(list.ReceivePayload<TxPayload>().Object);
 					}
-					Assert.True(matched.Count > 1);
+					Assert.True(matched.Count >= 10);
 					tree = tree.Trim(knownTx);
 					Assert.True(tree.GetMatchedTransactions().Count() == 1);
-					Assert.True(tree.GetMatchedTransactions().Contains(knownTx));
+					Assert.Contains(knownTx, tree.GetMatchedTransactions());
 
 					Action act = () =>
 					{
@@ -264,7 +384,7 @@ namespace NBitcoin.Tests
 					act();
 
 					var unknownBlock = uint256.Parse("00000000ad262227291eaf90cafdc56a8f8451e2d7653843122c5bb0bf2dfcdd");
-					node.SendMessageAsync(new GetDataPayload(new InventoryVector(InventoryType.MSG_FILTERED_BLOCK, Network.RegTest.GetGenesis().GetHash())));
+					nodeClient.SendMessageAsync(new GetDataPayload(new InventoryVector(InventoryType.MSG_FILTERED_BLOCK, Network.RegTest.GetGenesis().GetHash())));
 
 					merkle = list.ReceivePayload<MerkleBlockPayload>();
 					tree = merkle.Object.PartialMerkleTree;
@@ -276,16 +396,45 @@ namespace NBitcoin.Tests
 
 		[Fact]
 		[Trait("Protocol", "Protocol")]
+		public void MaxConnectionLimit()
+		{
+			using(var tester = new NodeServerTester())
+			{
+				tester.Server1.MaxConnections = 4;
+				Node.Connect(tester.Network, tester.Server1.ExternalEndpoint).VersionHandshake();
+				Node.Connect(tester.Network, tester.Server1.ExternalEndpoint).VersionHandshake();
+				Node.Connect(tester.Network, tester.Server1.ExternalEndpoint).VersionHandshake();
+				Node.Connect(tester.Network, tester.Server1.ExternalEndpoint).VersionHandshake();
+
+				TestUtils.Eventually(() => tester.Server1.ConnectedNodes.Count == 4);
+
+				var connect = Node.Connect(tester.Network, tester.Server1.ExternalEndpoint);
+				try
+				{
+					connect.VersionHandshake();
+				}
+				catch
+				{
+				}
+
+				TestUtils.Eventually(() => tester.Server1.ConnectedNodes.Count == 4);
+				TestUtils.Eventually(() => connect.IsConnected == false);
+			}
+		}
+
+
+		[Fact]
+		[Trait("Protocol", "Protocol")]
 		public void CanMaintainChainWithChainBehavior()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var node = builder.CreateNode(true).CreateNodeClient();
 				builder.Nodes[0].Generate(600);
 				var rpc = builder.Nodes[0].CreateRPCClient();
 				var chain = node.GetChain(rpc.GetBlockHash(500));
 				Assert.True(chain.Height == 500);
-				using(var tester = new NodeServerTester(Network.RegTest))
+				using(var tester = new NodeServerTester())
 				{
 					var n1 = tester.Node1;
 					n1.Behaviors.Add(new ChainBehavior(chain));
@@ -305,7 +454,61 @@ namespace NBitcoin.Tests
 					Assert.True(chain1.Height == 500);
 					chain1 = n1.GetChain(rpc.GetBlockHash(499));
 					Assert.True(chain1.Height == 499);
-					Thread.Sleep(5000);
+
+					//Should not broadcast above HighestValidatorPoW
+					n1.Behaviors.Find<ChainBehavior>().SharedState.HighestValidatedPoW = chain1.GetBlock(300);
+					chain1 = n2.GetChain(rpc.GetBlockHash(499));
+					Assert.True(chain1.Height == 300);
+				}
+			}
+		}
+
+		[Fact]
+		[Trait("Protocol", "Protocol")]
+		public void CanMaintainChainWithSlimChainBehavior()
+		{
+			using(var builder = NodeBuilderEx.Create())
+			{
+				var nodeClient = builder.CreateNode(true).CreateNodeClient();
+				builder.Nodes[0].Generate(300);
+				var rpc = builder.Nodes[0].CreateRPCClient();
+				var slimChain = nodeClient.GetSlimChain(rpc.GetBlockHash(200));
+				Assert.True(slimChain.Height == 200);
+
+				var node2 = builder.CreateNode(true);
+				var nodeClient2 = node2.CreateNodeClient();
+				var rpc2 = node2.CreateRPCClient();
+				rpc2.Generate(600);
+
+				nodeClient2.SynchronizeSlimChain(slimChain);
+				Assert.Equal(slimChain.Tip, rpc2.GetBestBlockHash());
+
+				nodeClient.Behaviors.Add(new SlimChainBehavior(slimChain));
+
+				Eventually(() =>
+				{
+					Assert.Equal(slimChain.Tip, rpc.GetBestBlockHash());
+				});
+				node2.Sync(builder.Nodes[0]);
+				Eventually(() =>
+				{
+					Assert.Equal(slimChain.Tip, rpc2.GetBestBlockHash());
+				});
+			}
+		}
+		private void Eventually(Action act)
+		{
+			CancellationTokenSource cts = new CancellationTokenSource(30000);
+			while(true)
+			{
+				try
+				{
+					act();
+					break;
+				}
+				catch(XunitException) when(!cts.Token.IsCancellationRequested)
+				{
+					cts.Token.WaitHandle.WaitOne(500);
 				}
 			}
 		}
@@ -314,7 +517,7 @@ namespace NBitcoin.Tests
 		[Trait("Protocol", "Protocol")]
 		public void CanCancelConnection()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var node = builder.CreateNode(true);
 				CancellationTokenSource cts = new CancellationTokenSource();
@@ -337,13 +540,14 @@ namespace NBitcoin.Tests
 		[Trait("Protocol", "Protocol")]
 		public void CanGetTransactionsFromMemPool()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var node = builder.CreateNode();
 				node.ConfigParameters.Add("whitelist", "127.0.0.1");
 				node.Start();
-				node.Generate(101);
-				node.CreateRPCClient().SendToAddress(new Key().PubKey.GetAddress(Network.RegTest), Money.Coins(1.0m));
+				var rpc = node.CreateRPCClient();
+				rpc.Generate(101);
+				rpc.SendToAddress(new Key().PubKey.GetAddress(Network.RegTest), Money.Coins(1.0m));
 				var client = node.CreateNodeClient();
 				client.VersionHandshake();
 				var transactions = client.GetMempoolTransactions();
@@ -358,7 +562,10 @@ namespace NBitcoin.Tests
 			Stopwatch watch = new Stopwatch();
 			NodeConnectionParameters parameters = new NodeConnectionParameters();
 			var addrman = GetCachedAddrMan("addrmancache.dat");
-			parameters.TemplateBehaviors.Add(new AddressManagerBehavior(addrman));
+			parameters.TemplateBehaviors.Add(new AddressManagerBehavior(addrman)
+			{
+				PeersToDiscover = 50
+			});
 			watch.Start();
 			using(var node = Node.Connect(Network.Main, parameters))
 			{
@@ -388,10 +595,11 @@ namespace NBitcoin.Tests
 		[Trait("Protocol", "Protocol")]
 		public void CanGetBlocksWithProtocol()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var node = builder.CreateNode(true);
-				node.Generate(50);
+				var rpc = node.CreateRPCClient();
+				rpc.Generate(50);
 				var client = node.CreateNodeClient();
 				var chain = client.GetChain();
 				var blocks = client.GetBlocks(chain.GetBlock(20).HashBlock).ToArray();
@@ -409,12 +617,13 @@ namespace NBitcoin.Tests
 		[Trait("Protocol", "Protocol")]
 		public void CanGetMemPool()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var node = builder.CreateNode();
+				var rpc = node.CreateRPCClient();
 				node.ConfigParameters.Add("whitelist", "127.0.0.1");
 				node.Start();
-				node.Generate(102);
+				rpc.Generate(102);
 				for(int i = 0; i < 2; i++)
 					node.CreateRPCClient().SendToAddress(new Key().PubKey.GetAddress(Network.RegTest), Money.Coins(1.0m));
 				var client = node.CreateNodeClient();
@@ -423,22 +632,72 @@ namespace NBitcoin.Tests
 			}
 		}
 
+
+		[Fact]
+		[Trait("Protocol", "Protocol")]
+		public async Task CanMaskExceptionThrownByMessageReceivers()
+		{
+			using (var builder = NodeBuilderEx.Create())
+			{
+				var node = builder.CreateNode();
+				var rpc = node.CreateRPCClient();
+				node.Start();
+				var nodeClient = node.CreateNodeClient();
+				TaskCompletionSource<bool> ok = new TaskCompletionSource<bool>();
+				nodeClient.VersionHandshake();
+				nodeClient.UncaughtException += (s, m) =>
+				{
+					ok.TrySetResult(m.GetType() == typeof(Exception) && m.Message == "test");
+				};
+				nodeClient.MessageReceived += (s, m) =>
+				{
+					throw new Exception("test");
+				};
+				nodeClient.SendMessage(new PingPayload());
+				Assert.True(await ok.Task);
+			}
+		}
+
+		[Fact]
+		[Trait("Protocol", "Protocol")]
+		public void SynchronizeChainSurviveReorg()
+		{
+			using(var builder = NodeBuilderEx.Create())
+			{
+				ConcurrentChain chain = new ConcurrentChain(Network.RegTest);
+				var node1 = builder.CreateNode(true);
+				node1.Generate(10);
+				node1.CreateNodeClient().SynchronizeChain(chain);
+				Assert.Equal(10, chain.Height);
+
+
+				var node2 = builder.CreateNode(true);
+				node2.Generate(12);
+
+				var node2c = node2.CreateNodeClient();
+				node2c.PollHeaderDelay = TimeSpan.FromSeconds(2);
+				node2c.SynchronizeChain(chain);
+				Assert.Equal(12, chain.Height);
+			}
+		}
+
 		[Fact]
 		[Trait("Protocol", "Protocol")]
 		public void CanGetChainsConcurrenty()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				bool generating = true;
-				builder.CreateNode(true);
+				var node = builder.CreateNode(true);
+				var rpc = node.CreateRPCClient();
 				Task.Run(() =>
 				{
-					builder.Nodes[0].Generate(600);
+					rpc.Generate(600);
 					generating = false;
 				});
-				var node = builder.Nodes[0].CreateNodeClient();
-				node.PollHeaderDelay = TimeSpan.FromSeconds(2);
-				node.VersionHandshake();
+				var nodeClient = node.CreateNodeClient();
+				nodeClient.PollHeaderDelay = TimeSpan.FromSeconds(2);
+				nodeClient.VersionHandshake();
 				Random rand = new Random();
 				Thread.Sleep(1000);
 				var chains =
@@ -446,19 +705,22 @@ namespace NBitcoin.Tests
 					.Select(_ => Task.Factory.StartNew(() =>
 					{
 						Thread.Sleep(rand.Next(0, 1000));
-						return node.GetChain();
+						return nodeClient.GetChain();
 					}))
 					.Select(t => t.Result)
 					.ToArray();
 				while(generating)
 				{
-					SyncAll(node, rand, chains);
+					SyncAll(nodeClient, rand, chains);
 				}
-				SyncAll(node, rand, chains);
+				SyncAll(nodeClient, rand, chains);
 				foreach(var c in chains)
 				{
 					Assert.Equal(600, c.Height);
 				}
+
+				var chainNoHeader = nodeClient.GetChain(new SynchronizeChainOptions() { SkipPoWCheck = true, StripHeaders = true });
+				Assert.False(chainNoHeader.Tip.HasHeader);
 			}
 		}
 
@@ -502,6 +764,7 @@ namespace NBitcoin.Tests
 				Assert.Equal(NodeState.HandShaked, toS2.State);
 				Thread.Sleep(100); //Let the time to Server2 to add the new node, else the test was failing sometimes.
 				Assert.Equal(NodeState.HandShaked, tester.Node2.State);
+				Assert.NotNull(toS2.TimeOffset);
 			}
 		}
 
@@ -539,7 +802,7 @@ namespace NBitcoin.Tests
 			using(var tester = new NodeServerTester())
 			{
 				tester.Server2.Nonce = tester.Server1.Nonce;
-				Assert.Throws(typeof(InvalidOperationException), () =>
+				Assert.Throws<InvalidOperationException>(() =>
 				{
 					tester.Node1.VersionHandshake();
 				});
@@ -576,7 +839,7 @@ namespace NBitcoin.Tests
 				n1.Behaviors.Clear();
 				Thread.Sleep(1200);
 				Assert.True(n2.State == NodeState.Disconnecting || n2.State == NodeState.Offline);
-				Assert.True(n2.DisconnectReason.Reason.StartsWith("Pong timeout", StringComparison.Ordinal));
+				Assert.StartsWith("Pong timeout", n2.DisconnectReason.Reason, StringComparison.Ordinal);
 			}
 		}
 
@@ -611,6 +874,15 @@ namespace NBitcoin.Tests
 			}
 		}
 
+		[Fact]
+		[Trait("UnitTest", "UnitTest")]
+		public void CanRoundtripCmpctBlock()
+		{
+			Block block = Network.Main.Consensus.ConsensusFactory.CreateBlock();
+			block.Transactions.Add(Network.Main.Consensus.ConsensusFactory.CreateTransaction());
+			var cmpct = new CmpctBlockPayload(block);
+			cmpct.Clone();
+		}
 
 		[Fact]
 		[Trait("UnitTest", "UnitTest")]
@@ -618,7 +890,7 @@ namespace NBitcoin.Tests
 		{
 			var hex = "f9beb4d972656a6563740000000000003a000000db7f7e7802747812156261642d74786e732d696e707574732d7370656e74577a9694da4ff41ae999f6591cff3749ad6a7db19435f3d8af5fecbcff824196";
 			Message message = new Message();
-			message.ReadWrite(Encoders.Hex.DecodeData(hex));
+			message.ReadWrite(Encoders.Hex.DecodeData(hex), Network.Main);
 			var reject = (RejectPayload)message.Payload;
 			Assert.True(reject.Message == "tx");
 			Assert.True(reject.Code == RejectCode.DUPLICATE);
@@ -630,19 +902,21 @@ namespace NBitcoin.Tests
 		[Fact]
 		[Trait("Protocol", "Protocol")]
 		public void CanDownloadBlock()
-		{
-			using(var builder = NodeBuilder.Create())
+		{	
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var node = builder.CreateNode(true).CreateNodeClient();
 				node.VersionHandshake();
-				node.SendMessageAsync(new GetDataPayload(new InventoryVector()
-				{
-					Hash = Network.RegTest.GenesisHash,
-					Type = InventoryType.MSG_BLOCK
-				}));
-
-				var block = node.ReceiveMessage<BlockPayload>();
-				Assert.True(block.Object.CheckMerkleRoot());
+				using (var listener = node.CreateListener())
+				{ 
+					node.SendMessageAsync(new GetDataPayload(new InventoryVector()
+					{
+						Hash = Network.RegTest.GenesisHash,
+						Type = InventoryType.MSG_BLOCK
+					}));
+					var block = listener.ReceivePayload<BlockPayload>();
+					Assert.True(block.Object.CheckMerkleRoot());
+				}
 			}
 		}
 
@@ -650,7 +924,7 @@ namespace NBitcoin.Tests
 		[Trait("Protocol", "Protocol")]
 		public void CanDownloadHeaders()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var node = builder.CreateNode(true).CreateNodeClient();
 				builder.Nodes[0].Generate(50);
@@ -670,7 +944,7 @@ namespace NBitcoin.Tests
 		[Trait("Protocol", "Protocol")]
 		public void CanDownloadBlocks()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var node = builder.CreateNode(true).CreateNodeClient();
 				builder.Nodes[0].Generate(50);
@@ -689,7 +963,7 @@ namespace NBitcoin.Tests
 		[Trait("Protocol", "Protocol")]
 		public void CanDownloadLastBlocks()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var node = builder.CreateNode(true).CreateNodeClient();
 				builder.Nodes[0].Generate(150);

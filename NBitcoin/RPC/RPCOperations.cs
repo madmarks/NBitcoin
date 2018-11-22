@@ -33,7 +33,7 @@ namespace NBitcoin.RPC
 		getblocktemplate,
 		submitblock,
 		estimatefee,
-		estimatepriority,
+		estimatesmartfee,
 
 		getnewaddress,
 		getaccountaddress,
@@ -67,6 +67,7 @@ namespace NBitcoin.RPC
 		walletlock,
 		encryptwallet,
 		validateaddress,
+		[Obsolete("Deprecated in Bitcoin Core 0.16.0 use getblockchaininfo, getnetworkinfo, getwalletinfo or getmininginfo instead")]
 		getinfo,
 		getwalletinfo,
 		getblockchaininfo,
@@ -95,6 +96,11 @@ namespace NBitcoin.RPC
 		gettxoutsetinfo,
 		gettxout,
 		verifychain,
-		getchaintips
+		getchaintips,
+		invalidateblock,
+		bumpfee,
+		abandontransaction,
+		signrawtransactionwithkey,
+		scantxoutset
 	}
 }

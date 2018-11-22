@@ -20,15 +20,11 @@ namespace NBitcoin
 		public FileLock(string filePath, FileLockType lockType)
 		{
 			if(filePath == null)
-				throw new ArgumentNullException("filePath");
+				throw new ArgumentNullException(nameof(filePath));
 			if(!File.Exists(filePath))
 				try
 				{
-#if !NETCORE
-					File.Create(filePath).Close();
-#else
-					File.Create(filePath).Flush(false);
-#endif
+					File.Create(filePath).Dispose();
 				}
 				catch
 				{

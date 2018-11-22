@@ -16,7 +16,7 @@ namespace NBitcoin.Tests
 		[Fact]
 		public void CanGetChainInfo()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var client = builder.CreateNode().CreateRESTClient();
 				builder.StartAll();
@@ -26,9 +26,28 @@ namespace NBitcoin.Tests
 		}
 
 		[Fact]
+		public void CanCalculateChainWork()
+		{
+			using(var builder = NodeBuilderEx.Create())
+			{
+				var node = builder.CreateNode();
+				var client = node.CreateRESTClient();
+				var rpc = node.CreateRPCClient();
+				builder.StartAll();
+				var info = client.GetChainInfoAsync().Result;
+				Assert.Equal("regtest", info.Chain);
+				Assert.Equal(new ChainedBlock(Network.RegTest.GetGenesis().Header, 0).GetChainWork(false), info.ChainWork);
+				rpc.Generate(10);
+				var chain = node.CreateNodeClient().GetChain();
+				info = client.GetChainInfoAsync().Result;
+				Assert.Equal(info.ChainWork, chain.Tip.GetChainWork(false));
+			}
+		}
+
+		[Fact]
 		public void CanGetBlock()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var client = builder.CreateNode().CreateRESTClient();
 				builder.StartAll();
@@ -40,12 +59,12 @@ namespace NBitcoin.Tests
 		[Fact]
 		public void CanGetBlockHeader()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var client = builder.CreateNode().CreateRESTClient();
 				var rpc = builder.Nodes[0].CreateRPCClient();
 				builder.StartAll();
-				builder.Nodes[0].Generate(2);
+				rpc.Generate(2);
 				var result = client.GetBlockHeadersAsync(RegNetGenesisBlock.GetHash(), 3).Result;
 				var headers = result.ToArray();
 				var last = headers.Last();
@@ -59,7 +78,7 @@ namespace NBitcoin.Tests
 		[Fact]
 		public void CanGetTransaction()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var client = builder.CreateNode().CreateRESTClient();
 				builder.StartAll();
@@ -75,41 +94,51 @@ namespace NBitcoin.Tests
 		[Fact]
 		public void CanGetUTXOsMempool()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var client = builder.CreateNode().CreateRESTClient();
 				var rpc = builder.Nodes[0].CreateRPCClient();
 				builder.StartAll();
-				builder.Nodes[0].Generate(110);
+				var k = new Key().GetBitcoinSecret(Network.RegTest);
+				rpc.Generate(102);
+				rpc.ImportPrivKey(k);
+				rpc.SendToAddress(k.GetAddress(), Money.Coins(50m));
+				rpc.Generate(1);
 				var c = rpc.ListUnspent().First();
+				c = rpc.ListUnspent(0, 999999, k.GetAddress()).First();
 				var outPoint = c.OutPoint;
 				var utxos = client.GetUnspentOutputsAsync(new[] { outPoint }, true).Result;
-				Assert.Equal(1, utxos.Outputs.Length);
-				Assert.Equal(1, (int)utxos.Outputs[0].Version);
+				Assert.Single(utxos.Outputs);
+				Assert.Equal(0, (int)utxos.Outputs[0].Version);
 				Assert.Equal(Money.Coins(50m), utxos.Outputs[0].Output.Value);
+
+				var countBefore = rpc.ListUnspent().Length;
+				rpc.LockUnspent(outPoint);
+				var countAfter = rpc.ListUnspent().Length;
+				Assert.Equal(countBefore - 1, countAfter);
 			}
 		}
 
 		[Fact]
 		public void CanGetUTXOs()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var client = builder.CreateNode().CreateRESTClient();
 				builder.StartAll();
 				var txId = uint256.Parse("3a3422dfd155f1d2ffc3e46cf978a9c5698c17c187f04cfa1b93358699c4ed3f");
 				var outPoint = new OutPoint(txId, 0);
 				var utxos = client.GetUnspentOutputsAsync(new[] { outPoint }, false).Result;
-				Assert.Equal(true, utxos.Bitmap[0]);
-				Assert.Equal(false, utxos.Bitmap[1]);
-				Assert.Equal(0, utxos.Outputs.Length);
+				Assert.True(utxos.Bitmap[0]);
+				Assert.False(utxos.Bitmap[1]);
+				Assert.Empty(utxos.Outputs);
 			}
 		}
 
 		[Fact]
 		public void ThrowsRestApiClientException()
 		{
-			using(var builder = NodeBuilder.Create())
+			using(var builder = NodeBuilderEx.Create())
 			{
 				var client = builder.CreateNode().CreateRESTClient();
 				builder.StartAll();

@@ -1,8 +1,9 @@
-﻿using Newtonsoft.Json.Linq;
+﻿#if !NOJSONNET
+using Newtonsoft.Json.Linq;
+#endif
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Numerics;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading.Tasks;
@@ -18,7 +19,7 @@ namespace NBitcoin.OpenAsset
 		public ColoredEntry(uint index, AssetMoney asset)
 		{
 			if(asset == null)
-				throw new ArgumentNullException("asset");
+				throw new ArgumentNullException(nameof(asset));
 			Index = index;
 			Asset = asset;
 		}
@@ -46,7 +47,7 @@ namespace NBitcoin.OpenAsset
 				_Asset = value;
 			}
 		}
-		#region IBitcoinSerializable Members
+#region IBitcoinSerializable Members
 
 		public void ReadWrite(BitcoinStream stream)
 		{
@@ -68,7 +69,7 @@ namespace NBitcoin.OpenAsset
 			}
 		}
 
-		#endregion
+#endregion
 
 		public override string ToString()
 		{
@@ -98,15 +99,7 @@ namespace NBitcoin.OpenAsset
 		}
 		public static ColoredTransaction FetchColors(uint256 txId, Transaction tx, IColoredTransactionRepository repo)
 		{
-			try
-			{
-				return FetchColorsAsync(txId, tx, repo).Result;
-			}
-			catch(AggregateException aex)
-			{
-				ExceptionDispatchInfo.Capture(aex.InnerException).Throw();
-				return null;
-			}
+			return FetchColorsAsync(txId, tx, repo).GetAwaiter().GetResult();
 		}
 
 		class ColoredFrame
@@ -132,7 +125,7 @@ namespace NBitcoin.OpenAsset
 		public static async Task<ColoredTransaction> FetchColorsAsync(uint256 txId, Transaction tx, IColoredTransactionRepository repo)
 		{
 			if(repo == null)
-				throw new ArgumentNullException("repo");
+				throw new ArgumentNullException(nameof(repo));
 			if(txId == null)
 			{
 				if(tx == null)
@@ -292,9 +285,9 @@ namespace NBitcoin.OpenAsset
 			: this()
 		{
 			if(tx == null)
-				throw new ArgumentNullException("tx");
+				throw new ArgumentNullException(nameof(tx));
 			if(spentCoins == null)
-				throw new ArgumentNullException("spentCoins");
+				throw new ArgumentNullException(nameof(spentCoins));
 			if(tx.IsCoinBase || tx.Inputs.Count == 0)
 				return;
 			txId = txId ?? tx.GetHash();
@@ -449,7 +442,7 @@ namespace NBitcoin.OpenAsset
 				.ToArray();
 		}
 
-		#region IBitcoinSerializable Members
+#region IBitcoinSerializable Members
 
 		public void ReadWrite(BitcoinStream stream)
 		{
@@ -477,7 +470,7 @@ namespace NBitcoin.OpenAsset
 			stream.ReadWrite(ref _Transfers);
 		}
 
-		#endregion
+#endregion
 
 		List<ColoredEntry> _Inputs;
 		public List<ColoredEntry> Inputs
@@ -491,7 +484,7 @@ namespace NBitcoin.OpenAsset
 				_Inputs = value;
 			}
 		}
-
+#if !NOJSONNET
 		public override string ToString()
 		{
 			return ToString(Network.Main);
@@ -540,7 +533,7 @@ namespace NBitcoin.OpenAsset
 			JProperty quantity = new JProperty("quantity", entry.Asset.Quantity);
 			inputs.Add(new JObject(index, asset, quantity));
 		}
-
+#endif
 		//00000000000000001c7a19e8ef62d815d84a473f543de77f23b8342fc26812a9 at 299220 Monday, May 5, 2014 3:47:37 PM first block
 		public static readonly DateTimeOffset FirstColoredDate = new DateTimeOffset(2014, 05, 4, 0, 0, 0, TimeSpan.Zero);
 	}
